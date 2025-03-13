@@ -19,6 +19,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "can.h"
+#include "usart.h"
 #include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
@@ -27,6 +28,8 @@
 #include <math.h>
 #include "bsp_can.h"
 #include "pid.h"
+
+
 
 
 /* USER CODE END Includes */
@@ -119,6 +122,7 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_CAN1_Init();
+  MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
 
   /* USER CODE END 2 */
@@ -128,21 +132,27 @@ int main(void)
   while (1)
   {
       led_cnt ++;// LED计数器自增
-      if (led_cnt == 250)
+      if (led_cnt == 25)
       {
           led_cnt = 0;
           HAL_GPIO_TogglePin(GPIOH,GPIO_PIN_11); //blink cycle 500ms
           // 翻转GPIOH, PIN11引脚的电平，实现LED闪烁，周期为500ms (250 * 2ms)
       }
 
-      now_yaw_angle=msp(motor_yaw_info.rotor_angle,0,8191,-M_PI,M_PI);//计算当前的编码器角度值，运用msp函数将编码器的值映射为弧度制
-      //计算当前的编码器角度值，运用msp函数将编码器的值映射为弧度制，范围从0-8191映射到-pi到pi
-      pid_calc(&gimbal_yaw_angle_pid,target_yaw_angle, now_yaw_angle);
-      //角度环PID计算，输入目标角度和当前角度，计算输出
-      pid_calc(&gimbal_yaw_speed_pid,gimbal_yaw_angle_pid.output, motor_yaw_info.rotor_speed);//速度环
-      //速度环PID计算，输入目标速度（角度环的输出）和当前速度，计算输出
-      set_GM6020_motor_voltage(&hcan1,gimbal_yaw_speed_pid.output);
-      //can发送函数，发送经过PID计算的电压值，控制GM6020电机
+      set_GM6020_motor_voltage(&hcan1, 100); // 发送固定电压值 1000
+      HAL_Delay(40);
+
+//      // 设置目标角度 (例如，偏转 90 度)
+//      target_yaw_angle = M_PI / 2;
+//
+//      now_yaw_angle=msp(motor_yaw_info.rotor_angle,0,8191,-M_PI,M_PI);//计算当前的编码器角度值，运用msp函数将编码器的值映射为弧度制
+//      //计算当前的编码器角度值，运用msp函数将编码器的值映射为弧度制，范围从0-8191映射到-pi到pi
+//      pid_calc(&gimbal_yaw_angle_pid,target_yaw_angle, now_yaw_angle);
+//      //角度环PID计算，输入目标角度和当前角度，计算输出
+//      pid_calc(&gimbal_yaw_speed_pid,gimbal_yaw_angle_pid.output, motor_yaw_info.rotor_speed);//速度环
+//      //速度环PID计算，输入目标速度（角度环的输出）和当前速度，计算输出
+//      set_GM6020_motor_voltage(&hcan1,gimbal_yaw_speed_pid.output);
+//      //can发送函数，发送经过PID计算的电压值，控制GM6020电机
 
 
       HAL_Delay(40);
@@ -167,6 +177,15 @@ void SystemClock_Config(void)
   */
   __HAL_RCC_PWR_CLK_ENABLE();
   __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
+
+    //Clion调试
+    // 先将时钟源选择为内部时钟
+    RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_SYSCLK;
+    RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI;
+    if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_5) != HAL_OK)
+    {
+        Error_Handler();
+    }
 
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
