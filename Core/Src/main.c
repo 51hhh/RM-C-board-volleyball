@@ -132,8 +132,8 @@ int main(void)
           // 翻转GPIOH, PIN11引脚的电平，实现LED闪烁，周期为500ms (250 * 2ms)
       }
 
-      set_GM6020_motor_voltage(&hcan1, 100); // 发送固定电压值 1000
-      HAL_Delay(40);
+//      set_GM6020_motor_voltage(&hcan1, 1000); // 发送固定电压值 1000
+//      HAL_Delay(40);
 
 //      // 设置目标角度 (例如，偏转 90 度)
 //      target_yaw_angle = M_PI / 2;
