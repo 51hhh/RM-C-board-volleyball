@@ -19,6 +19,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "can.h"
+#include "dma.h"
 #include "usart.h"
 #include "gpio.h"
 
@@ -99,17 +100,6 @@ int main(void)
 
   /* USER CODE BEGIN Init */
 
-    SystemClock_Config();
-
-    MX_GPIO_Init();
-//    MX_DMA_Init();
-    MX_CAN1_Init();
-//    MX_USART3_UART_Init();
-//    MX_USART1_UART_Init();
-
-    can_filter_init();//can初始化
-    gimbal_PID_init();//PID初始化
-
   /* USER CODE END Init */
 
   /* Configure the system clock */
@@ -121,10 +111,13 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_CAN1_Init();
   MX_USART1_UART_Init();
+  MX_USART3_UART_Init();
   /* USER CODE BEGIN 2 */
-
+    can_filter_init();//can初始化
+    gimbal_PID_init();//PID初始化
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -178,7 +171,6 @@ void SystemClock_Config(void)
   __HAL_RCC_PWR_CLK_ENABLE();
   __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
 
-    //Clion调试
     // 先将时钟源选择为内部时钟
     RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_SYSCLK;
     RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI;

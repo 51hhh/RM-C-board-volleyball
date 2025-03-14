@@ -32,6 +32,7 @@ set(CMAKE_ASM_TARGET_INCLUDE_PATH
 set(CMAKE_DEPENDS_DEPENDENCY_FILES
   "D:/robotmaster/RM-C/LED/Core/Src/bsp_can.c" "CMakeFiles/LED.elf.dir/Core/Src/bsp_can.c.obj" "gcc" "CMakeFiles/LED.elf.dir/Core/Src/bsp_can.c.obj.d"
   "D:/robotmaster/RM-C/LED/Core/Src/can.c" "CMakeFiles/LED.elf.dir/Core/Src/can.c.obj" "gcc" "CMakeFiles/LED.elf.dir/Core/Src/can.c.obj.d"
+  "D:/robotmaster/RM-C/LED/Core/Src/dma.c" "CMakeFiles/LED.elf.dir/Core/Src/dma.c.obj" "gcc" "CMakeFiles/LED.elf.dir/Core/Src/dma.c.obj.d"
   "D:/robotmaster/RM-C/LED/Core/Src/gpio.c" "CMakeFiles/LED.elf.dir/Core/Src/gpio.c.obj" "gcc" "CMakeFiles/LED.elf.dir/Core/Src/gpio.c.obj.d"
   "D:/robotmaster/RM-C/LED/Core/Src/main.c" "CMakeFiles/LED.elf.dir/Core/Src/main.c.obj" "gcc" "CMakeFiles/LED.elf.dir/Core/Src/main.c.obj.d"
   "D:/robotmaster/RM-C/LED/Core/Src/pid.c" "CMakeFiles/LED.elf.dir/Core/Src/pid.c.obj" "gcc" "CMakeFiles/LED.elf.dir/Core/Src/pid.c.obj.d"

@@ -3,6 +3,8 @@ file(REMOVE_RECURSE
   "CMakeFiles/LED.elf.dir/Core/Src/bsp_can.c.obj.d"
   "CMakeFiles/LED.elf.dir/Core/Src/can.c.obj"
   "CMakeFiles/LED.elf.dir/Core/Src/can.c.obj.d"
+  "CMakeFiles/LED.elf.dir/Core/Src/dma.c.obj"
+  "CMakeFiles/LED.elf.dir/Core/Src/dma.c.obj.d"
   "CMakeFiles/LED.elf.dir/Core/Src/gpio.c.obj"
   "CMakeFiles/LED.elf.dir/Core/Src/gpio.c.obj.d"
   "CMakeFiles/LED.elf.dir/Core/Src/main.c.obj"

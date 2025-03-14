@@ -80,6 +80,45 @@ CMakeFiles/LED.elf.dir/Core/Src/can.c.obj: D:/robotmaster/RM-C/LED/Core/Src/can.
   D:/robotmaster/RM-C/LED/Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_rcc_ex.h \
   D:/robotmaster/RM-C/LED/Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_uart.h
 
+CMakeFiles/LED.elf.dir/Core/Src/dma.c.obj: D:/robotmaster/RM-C/LED/Core/Src/dma.c \
+  D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/_newlib_version.h \
+  D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/machine/_default_types.h \
+  D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/stdint.h \
+  D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/_intsup.h \
+  D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/_stdint.h \
+  D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/features.h \
+  D:/STM32/arm-none-eabi-gcc/lib/gcc/arm-none-eabi/14.2.1/include/stddef.h \
+  D:/STM32/arm-none-eabi-gcc/lib/gcc/arm-none-eabi/14.2.1/include/stdint.h \
+  D:/robotmaster/RM-C/LED/Core/Inc/dma.h \
+  D:/robotmaster/RM-C/LED/Core/Inc/main.h \
+  D:/robotmaster/RM-C/LED/Core/Inc/stm32f4xx_hal_conf.h \
+  D:/robotmaster/RM-C/LED/Drivers/CMSIS/Device/ST/STM32F4xx/Include/stm32f407xx.h \
+  D:/robotmaster/RM-C/LED/Drivers/CMSIS/Device/ST/STM32F4xx/Include/stm32f4xx.h \
+  D:/robotmaster/RM-C/LED/Drivers/CMSIS/Device/ST/STM32F4xx/Include/system_stm32f4xx.h \
+  D:/robotmaster/RM-C/LED/Drivers/CMSIS/Include/cmsis_compiler.h \
+  D:/robotmaster/RM-C/LED/Drivers/CMSIS/Include/cmsis_gcc.h \
+  D:/robotmaster/RM-C/LED/Drivers/CMSIS/Include/cmsis_version.h \
+  D:/robotmaster/RM-C/LED/Drivers/CMSIS/Include/core_cm4.h \
+  D:/robotmaster/RM-C/LED/Drivers/CMSIS/Include/mpu_armv7.h \
+  D:/robotmaster/RM-C/LED/Drivers/STM32F4xx_HAL_Driver/Inc/Legacy/stm32_hal_legacy.h \
+  D:/robotmaster/RM-C/LED/Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal.h \
+  D:/robotmaster/RM-C/LED/Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_can.h \
+  D:/robotmaster/RM-C/LED/Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_cortex.h \
+  D:/robotmaster/RM-C/LED/Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_def.h \
+  D:/robotmaster/RM-C/LED/Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_dma.h \
+  D:/robotmaster/RM-C/LED/Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_dma_ex.h \
+  D:/robotmaster/RM-C/LED/Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_exti.h \
+  D:/robotmaster/RM-C/LED/Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_flash.h \
+  D:/robotmaster/RM-C/LED/Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_flash_ex.h \
+  D:/robotmaster/RM-C/LED/Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_flash_ramfunc.h \
+  D:/robotmaster/RM-C/LED/Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_gpio.h \
+  D:/robotmaster/RM-C/LED/Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_gpio_ex.h \
+  D:/robotmaster/RM-C/LED/Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pwr.h \
+  D:/robotmaster/RM-C/LED/Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pwr_ex.h \
+  D:/robotmaster/RM-C/LED/Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_rcc.h \
+  D:/robotmaster/RM-C/LED/Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_rcc_ex.h \
+  D:/robotmaster/RM-C/LED/Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_uart.h
+
 CMakeFiles/LED.elf.dir/Core/Src/gpio.c.obj: D:/robotmaster/RM-C/LED/Core/Src/gpio.c \
   D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/_newlib_version.h \
   D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/machine/_default_types.h \
@@ -140,6 +179,7 @@ CMakeFiles/LED.elf.dir/Core/Src/main.c.obj: D:/robotmaster/RM-C/LED/Core/Src/mai
   D:/STM32/arm-none-eabi-gcc/lib/gcc/arm-none-eabi/14.2.1/include/stdint.h \
   D:/robotmaster/RM-C/LED/Core/Inc/bsp_can.h \
   D:/robotmaster/RM-C/LED/Core/Inc/can.h \
+  D:/robotmaster/RM-C/LED/Core/Inc/dma.h \
   D:/robotmaster/RM-C/LED/Core/Inc/gpio.h \
   D:/robotmaster/RM-C/LED/Core/Inc/main.h \
   D:/robotmaster/RM-C/LED/Core/Inc/pid.h \
@@ -1082,8 +1122,6 @@ D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/_newlib_version.h:
 
 D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/_intsup.h:
 
-D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/machine/_endian.h:
-
 D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/stdint.h:
 
 D:/robotmaster/RM-C/LED/Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_def.h:
@@ -1172,13 +1210,15 @@ D:/robotmaster/RM-C/LED/Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_uart.h:
 
 D:/robotmaster/RM-C/LED/Core/Src/can.c:
 
+D:/robotmaster/RM-C/LED/Core/Src/dma.c:
+
+D:/robotmaster/RM-C/LED/Core/Inc/dma.h:
+
 D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/machine/time.h:
 
 D:/robotmaster/RM-C/LED/Core/Src/main.c:
 
 D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/_ansi.h:
-
-D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/machine/_time.h:
 
 D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/machine/_types.h:
 
@@ -1199,6 +1239,10 @@ D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/config.h:
 D:/robotmaster/RM-C/LED/Core/Inc/usart.h:
 
 D:/robotmaster/RM-C/LED/Core/Src/pid.c:
+
+D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/machine/_endian.h:
+
+D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/machine/_time.h:
 
 D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/machine/endian.h:
 
