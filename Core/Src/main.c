@@ -29,8 +29,7 @@
 #include <math.h>
 #include "bsp_can.h"
 #include "pid.h"
-
-
+#include "../application/remote_control.h"
 
 
 /* USER CODE END Includes */
@@ -118,6 +117,8 @@ int main(void)
   /* USER CODE BEGIN 2 */
     can_filter_init();//can初始化
     gimbal_PID_init();//PID初始化
+    remote_control_init();//遥控器初始化
+    const RC_ctrl_t *rc_ctrl_point; // 声明遥控器数据指针
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -134,18 +135,39 @@ int main(void)
 
 //      set_GM6020_motor_voltage(&hcan1, 1000); // 发送固定电压值 1000
 //      HAL_Delay(40);
+      // 获取遥控器数据指针
+      rc_ctrl_point = get_remote_control_point();
 
-//      // 设置目标角度 (例如，偏转 90 度)
-//      target_yaw_angle = M_PI / 2;
-//
-//      now_yaw_angle=msp(motor_yaw_info.rotor_angle,0,8191,-M_PI,M_PI);//计算当前的编码器角度值，运用msp函数将编码器的值映射为弧度制
-//      //计算当前的编码器角度值，运用msp函数将编码器的值映射为弧度制，范围从0-8191映射到-pi到pi
-//      pid_calc(&gimbal_yaw_angle_pid,target_yaw_angle, now_yaw_angle);
-//      //角度环PID计算，输入目标角度和当前角度，计算输出
-//      pid_calc(&gimbal_yaw_speed_pid,gimbal_yaw_angle_pid.output, motor_yaw_info.rotor_speed);//速度环
-//      //速度环PID计算，输入目标速度（角度环的输出）和当前速度，计算输出
-//      set_GM6020_motor_voltage(&hcan1,gimbal_yaw_speed_pid.output);
-//      //can发送函数，发送经过PID计算的电压值，控制GM6020电机
+
+      if (rc_ctrl_point != NULL)
+      {
+          // 使用遥控器数据计算目标角度
+          // 假设 ch[0] 和 ch[1] 的范围是 -660 到 660
+          float x = (float)rc_ctrl_point->rc.ch[0];
+          float y = (float)rc_ctrl_point->rc.ch[1];
+
+          // 映射 x 和 y 到 -1 到 1 的范围
+          float x_normalized = x / 660.0f;
+          float y_normalized = y / 660.0f;
+
+          // 使用 atan2 计算角度
+          target_yaw_angle = atan2f(y_normalized, x_normalized);
+
+          // 限制角度在 -PI 到 PI 之间
+          if (target_yaw_angle > M_PI) {
+              target_yaw_angle -= 2 * M_PI;
+          } else if (target_yaw_angle < -M_PI) {
+              target_yaw_angle += 2 * M_PI;
+          }
+      }
+      now_yaw_angle=msp(motor_yaw_info.rotor_angle,0,8191,-M_PI,M_PI);//计算当前的编码器角度值，运用msp函数将编码器的值映射为弧度制
+      //计算当前的编码器角度值，运用msp函数将编码器的值映射为弧度制，范围从0-8191映射到-pi到pi
+      pid_calc(&gimbal_yaw_angle_pid,target_yaw_angle, now_yaw_angle);
+      //角度环PID计算，输入目标角度和当前角度，计算输出
+      pid_calc(&gimbal_yaw_speed_pid,gimbal_yaw_angle_pid.output, motor_yaw_info.rotor_speed);//速度环
+      //速度环PID计算，输入目标速度（角度环的输出）和当前速度，计算输出
+      set_GM6020_motor_voltage(&hcan1,gimbal_yaw_speed_pid.output);
+      //can发送函数，发送经过PID计算的电压值，控制GM6020电机
 
 
       HAL_Delay(40);

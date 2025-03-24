@@ -7,7 +7,7 @@ set(CMAKE_DEPENDS_GENERATOR "MinGW Makefiles")
 # The top level Makefile was generated from the following files:
 set(CMAKE_MAKEFILE_DEPENDS
   "CMakeCache.txt"
-  "D:/robotmaster/RM-C/LED/CMakeLists.txt"
+  "D:/robotmaster/RM-C/6020/CMakeLists.txt"
   "CMakeFiles/3.30.5/CMakeASMCompiler.cmake"
   "CMakeFiles/3.30.5/CMakeCCompiler.cmake"
   "CMakeFiles/3.30.5/CMakeCXXCompiler.cmake"

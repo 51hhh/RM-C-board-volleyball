@@ -56,10 +56,10 @@ RM = "E:\CLion 2024.3.4\bin\cmake\win\x64\bin\cmake.exe" -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = D:\robotmaster\RM-C\LED
+CMAKE_SOURCE_DIR = D:\robotmaster\RM-C\6020
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = D:\robotmaster\RM-C\LED\cmake-build-debug
+CMAKE_BINARY_DIR = D:\robotmaster\RM-C\6020\cmake-build-debug
 
 #=============================================================================
 # Targets provided globally by CMake.
@@ -86,9 +86,9 @@ rebuild_cache/fast: rebuild_cache
 
 # The main all target
 all: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start D:\robotmaster\RM-C\LED\cmake-build-debug\CMakeFiles D:\robotmaster\RM-C\LED\cmake-build-debug\\CMakeFiles\progress.marks
+	$(CMAKE_COMMAND) -E cmake_progress_start D:\robotmaster\RM-C\6020\cmake-build-debug\CMakeFiles D:\robotmaster\RM-C\6020\cmake-build-debug\\CMakeFiles\progress.marks
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\Makefile2 all
-	$(CMAKE_COMMAND) -E cmake_progress_start D:\robotmaster\RM-C\LED\cmake-build-debug\CMakeFiles 0
+	$(CMAKE_COMMAND) -E cmake_progress_start D:\robotmaster\RM-C\6020\cmake-build-debug\CMakeFiles 0
 .PHONY : all
 
 # The main clean target
@@ -423,6 +423,54 @@ Core/Startup/startup_stm32f407ighx.obj: Core/Startup/startup_stm32f407ighx.s.obj
 Core/Startup/startup_stm32f407ighx.s.obj:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\LED.elf.dir\build.make CMakeFiles/LED.elf.dir/Core/Startup/startup_stm32f407ighx.s.obj
 .PHONY : Core/Startup/startup_stm32f407ighx.s.obj
+
+Core/application/bsp_rc.obj: Core/application/bsp_rc.c.obj
+.PHONY : Core/application/bsp_rc.obj
+
+# target to build an object file
+Core/application/bsp_rc.c.obj:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\LED.elf.dir\build.make CMakeFiles/LED.elf.dir/Core/application/bsp_rc.c.obj
+.PHONY : Core/application/bsp_rc.c.obj
+
+Core/application/bsp_rc.i: Core/application/bsp_rc.c.i
+.PHONY : Core/application/bsp_rc.i
+
+# target to preprocess a source file
+Core/application/bsp_rc.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\LED.elf.dir\build.make CMakeFiles/LED.elf.dir/Core/application/bsp_rc.c.i
+.PHONY : Core/application/bsp_rc.c.i
+
+Core/application/bsp_rc.s: Core/application/bsp_rc.c.s
+.PHONY : Core/application/bsp_rc.s
+
+# target to generate assembly for a file
+Core/application/bsp_rc.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\LED.elf.dir\build.make CMakeFiles/LED.elf.dir/Core/application/bsp_rc.c.s
+.PHONY : Core/application/bsp_rc.c.s
+
+Core/application/remote_control.obj: Core/application/remote_control.c.obj
+.PHONY : Core/application/remote_control.obj
+
+# target to build an object file
+Core/application/remote_control.c.obj:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\LED.elf.dir\build.make CMakeFiles/LED.elf.dir/Core/application/remote_control.c.obj
+.PHONY : Core/application/remote_control.c.obj
+
+Core/application/remote_control.i: Core/application/remote_control.c.i
+.PHONY : Core/application/remote_control.i
+
+# target to preprocess a source file
+Core/application/remote_control.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\LED.elf.dir\build.make CMakeFiles/LED.elf.dir/Core/application/remote_control.c.i
+.PHONY : Core/application/remote_control.c.i
+
+Core/application/remote_control.s: Core/application/remote_control.c.s
+.PHONY : Core/application/remote_control.s
+
+# target to generate assembly for a file
+Core/application/remote_control.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\LED.elf.dir\build.make CMakeFiles/LED.elf.dir/Core/application/remote_control.c.s
+.PHONY : Core/application/remote_control.c.s
 
 Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal.obj: Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal.c.obj
 .PHONY : Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal.obj
@@ -878,6 +926,12 @@ help:
 	@echo ... Core/Src/usart.i
 	@echo ... Core/Src/usart.s
 	@echo ... Core/Startup/startup_stm32f407ighx.obj
+	@echo ... Core/application/bsp_rc.obj
+	@echo ... Core/application/bsp_rc.i
+	@echo ... Core/application/bsp_rc.s
+	@echo ... Core/application/remote_control.obj
+	@echo ... Core/application/remote_control.i
+	@echo ... Core/application/remote_control.s
 	@echo ... Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal.obj
 	@echo ... Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal.i
 	@echo ... Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal.s
