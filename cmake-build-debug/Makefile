@@ -56,10 +56,10 @@ RM = "E:\CLion 2024.3.4\bin\cmake\win\x64\bin\cmake.exe" -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = D:\robotmaster\RM-C\6020
+CMAKE_SOURCE_DIR = D:\robotmaster\RM-C\3508
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = D:\robotmaster\RM-C\6020\cmake-build-debug
+CMAKE_BINARY_DIR = D:\robotmaster\RM-C\3508\cmake-build-debug
 
 #=============================================================================
 # Targets provided globally by CMake.
@@ -86,9 +86,9 @@ rebuild_cache/fast: rebuild_cache
 
 # The main all target
 all: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start D:\robotmaster\RM-C\6020\cmake-build-debug\CMakeFiles D:\robotmaster\RM-C\6020\cmake-build-debug\\CMakeFiles\progress.marks
+	$(CMAKE_COMMAND) -E cmake_progress_start D:\robotmaster\RM-C\3508\cmake-build-debug\CMakeFiles D:\robotmaster\RM-C\3508\cmake-build-debug\\CMakeFiles\progress.marks
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\Makefile2 all
-	$(CMAKE_COMMAND) -E cmake_progress_start D:\robotmaster\RM-C\6020\cmake-build-debug\CMakeFiles 0
+	$(CMAKE_COMMAND) -E cmake_progress_start D:\robotmaster\RM-C\3508\cmake-build-debug\CMakeFiles 0
 .PHONY : all
 
 # The main clean target
@@ -423,6 +423,30 @@ Core/Startup/startup_stm32f407ighx.obj: Core/Startup/startup_stm32f407ighx.s.obj
 Core/Startup/startup_stm32f407ighx.s.obj:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\LED.elf.dir\build.make CMakeFiles/LED.elf.dir/Core/Startup/startup_stm32f407ighx.s.obj
 .PHONY : Core/Startup/startup_stm32f407ighx.s.obj
+
+Core/application/CAN_receive.obj: Core/application/CAN_receive.c.obj
+.PHONY : Core/application/CAN_receive.obj
+
+# target to build an object file
+Core/application/CAN_receive.c.obj:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\LED.elf.dir\build.make CMakeFiles/LED.elf.dir/Core/application/CAN_receive.c.obj
+.PHONY : Core/application/CAN_receive.c.obj
+
+Core/application/CAN_receive.i: Core/application/CAN_receive.c.i
+.PHONY : Core/application/CAN_receive.i
+
+# target to preprocess a source file
+Core/application/CAN_receive.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\LED.elf.dir\build.make CMakeFiles/LED.elf.dir/Core/application/CAN_receive.c.i
+.PHONY : Core/application/CAN_receive.c.i
+
+Core/application/CAN_receive.s: Core/application/CAN_receive.c.s
+.PHONY : Core/application/CAN_receive.s
+
+# target to generate assembly for a file
+Core/application/CAN_receive.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\LED.elf.dir\build.make CMakeFiles/LED.elf.dir/Core/application/CAN_receive.c.s
+.PHONY : Core/application/CAN_receive.c.s
 
 Core/application/bsp_rc.obj: Core/application/bsp_rc.c.obj
 .PHONY : Core/application/bsp_rc.obj
@@ -926,6 +950,9 @@ help:
 	@echo ... Core/Src/usart.i
 	@echo ... Core/Src/usart.s
 	@echo ... Core/Startup/startup_stm32f407ighx.obj
+	@echo ... Core/application/CAN_receive.obj
+	@echo ... Core/application/CAN_receive.i
+	@echo ... Core/application/CAN_receive.s
 	@echo ... Core/application/bsp_rc.obj
 	@echo ... Core/application/bsp_rc.i
 	@echo ... Core/application/bsp_rc.s

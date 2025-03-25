@@ -24,6 +24,8 @@ file(REMOVE_RECURSE
   "CMakeFiles/LED.elf.dir/Core/Src/usart.c.obj"
   "CMakeFiles/LED.elf.dir/Core/Src/usart.c.obj.d"
   "CMakeFiles/LED.elf.dir/Core/Startup/startup_stm32f407ighx.s.obj"
+  "CMakeFiles/LED.elf.dir/Core/application/CAN_receive.c.obj"
+  "CMakeFiles/LED.elf.dir/Core/application/CAN_receive.c.obj.d"
   "CMakeFiles/LED.elf.dir/Core/application/bsp_rc.c.obj"
   "CMakeFiles/LED.elf.dir/Core/application/bsp_rc.c.obj.d"
   "CMakeFiles/LED.elf.dir/Core/application/remote_control.c.obj"

@@ -26,9 +26,12 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 // 自定义头文件
-#include <math.h>
+
+#include <stdio.h>
+#include <string.h>
 #include "bsp_can.h"
 #include "pid.h"
+#include "../application/CAN_receive.h"
 #include "../application/remote_control.h"
 
 
@@ -44,13 +47,9 @@
 //自定义私有类型定义 (typedef)
 
 int16_t led_cnt;  // LED计数器
-int16_t text_speed = 0; // 文本速度
-int16_t target_yaw_speed; // 目标yaw轴速度
-float target_yaw_angle = 0; // 目标yaw轴角度
-float now_yaw_angle; // 当前yaw轴角度
-extern moto_info_t motor_yaw_info; // 外部定义的电机信息结构体
+extern motor_measure_t motor_chassis; // 外部定义的电机信息结构体
 extern pid_struct_t gimbal_yaw_speed_pid; // 外部定义的速度环PID结构体
-extern pid_struct_t gimbal_yaw_angle_pid; // 外部定义的角度环PID结构体
+
 
 /* USER CODE END PD */
 
@@ -119,12 +118,49 @@ int main(void)
     gimbal_PID_init();//PID初始化
     remote_control_init();//遥控器初始化
     const RC_ctrl_t *rc_ctrl_point; // 声明遥控器数据指针
+    char uart_buffer[256];  // 定义 UART 输出缓冲区
+
+    // 初始化四个底盘电机的 PID 控制器
+    pid_struct_t motor1_pid, motor2_pid, motor3_pid, motor4_pid;
+    pid_init(&motor1_pid, 1.5, 0, 0, 30000, 16384); // 调整参数
+    pid_init(&motor2_pid, 1, 0, 0, 30000, 16384); // 调整参数
+    pid_init(&motor3_pid, 1, 0, 0, 30000, 16384); // 调整参数
+    pid_init(&motor4_pid, 1, 0, 0, 30000, 16384); // 调整参数
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+
+
+//      CAN_cmd_chassis(-1000, 1000, -1000, 1000);
+
+      // 获取四个电机的速度
+      const motor_measure_t *motor1 = get_chassis_motor_measure_point(0);
+      const motor_measure_t *motor2 = get_chassis_motor_measure_point(1);
+      const motor_measure_t *motor3 = get_chassis_motor_measure_point(2);
+      const motor_measure_t *motor4 = get_chassis_motor_measure_point(3);
+
+      // 设定目标速度 (这里可以根据你的需求修改)
+      float target_speed1 = 1000.0f; // rpm
+      float target_speed2 = -1000.0f; // rpm
+      float target_speed3 = 1000.0f; // rpm
+      float target_speed4 = -1000.0f; // rpm
+
+
+      // PID 计算
+      float output1 = pid_calc(&motor1_pid, target_speed1, motor1->speed_rpm);
+      float output2 = pid_calc(&motor2_pid, target_speed2, motor2->speed_rpm);
+      float output3 = pid_calc(&motor3_pid, target_speed3, motor3->speed_rpm);
+      float output4 = pid_calc(&motor4_pid, target_speed4, motor4->speed_rpm);
+
+      // 电流控制 (将 PID 输出转换为 int16_t 类型)
+//      CAN_cmd_chassis((int16_t)output1, (int16_t)output2, (int16_t)output3, (int16_t)output4);
+      CAN_cmd_chassis((int16_t)output1,(int16_t)output2,0,0);
+
+
       led_cnt ++;// LED计数器自增
       if (led_cnt == 25)
       {
@@ -133,41 +169,51 @@ int main(void)
           // 翻转GPIOH, PIN11引脚的电平，实现LED闪烁，周期为500ms (250 * 2ms)
       }
 
-//      set_GM6020_motor_voltage(&hcan1, 1000); // 发送固定电压值 1000
-//      HAL_Delay(40);
-      // 获取遥控器数据指针
-      rc_ctrl_point = get_remote_control_point();
+
+//          // 格式化输出电机速度到 UART1
+//          sprintf(uart_buffer, "M1:%d, M2:%d, M3:%d, M4:%d\r\n",
+//                  motor1->speed_rpm, motor2->speed_rpm, motor3->speed_rpm, motor4->speed_rpm);
+//
+//          // 通过 UART1 发送数据
+//          HAL_UART_Transmit(&huart1, (uint8_t *)uart_buffer, strlen(uart_buffer), HAL_MAX_DELAY);
 
 
-      if (rc_ctrl_point != NULL)
-      {
-          // 使用遥控器数据计算目标角度
-          // 假设 ch[0] 和 ch[1] 的范围是 -660 到 660
-          float x = (float)rc_ctrl_point->rc.ch[0];
-          float y = (float)rc_ctrl_point->rc.ch[1];
 
-          // 映射 x 和 y 到 -1 到 1 的范围
-          float x_normalized = x / 660.0f;
-          float y_normalized = y / 660.0f;
 
-          // 使用 atan2 计算角度
-          target_yaw_angle = atan2f(y_normalized, x_normalized);
 
-          // 限制角度在 -PI 到 PI 之间
-          if (target_yaw_angle > M_PI) {
-              target_yaw_angle -= 2 * M_PI;
-          } else if (target_yaw_angle < -M_PI) {
-              target_yaw_angle += 2 * M_PI;
-          }
-      }
-      now_yaw_angle=msp(motor_yaw_info.rotor_angle,0,8191,-M_PI,M_PI);//计算当前的编码器角度值，运用msp函数将编码器的值映射为弧度制
-      //计算当前的编码器角度值，运用msp函数将编码器的值映射为弧度制，范围从0-8191映射到-pi到pi
-      pid_calc(&gimbal_yaw_angle_pid,target_yaw_angle, now_yaw_angle);
-      //角度环PID计算，输入目标角度和当前角度，计算输出
-      pid_calc(&gimbal_yaw_speed_pid,gimbal_yaw_angle_pid.output, motor_yaw_info.rotor_speed);//速度环
-      //速度环PID计算，输入目标速度（角度环的输出）和当前速度，计算输出
-      set_GM6020_motor_voltage(&hcan1,gimbal_yaw_speed_pid.output);
-      //can发送函数，发送经过PID计算的电压值，控制GM6020电机
+//      // 获取遥控器数据指针
+//      rc_ctrl_point = get_remote_control_point();
+//
+//
+//      if (rc_ctrl_point != NULL)
+//      {
+//          // 使用遥控器数据计算目标角度
+//          // 假设 ch[0] 和 ch[1] 的范围是 -660 到 660
+//          float x = (float)rc_ctrl_point->rc.ch[0];
+//          float y = (float)rc_ctrl_point->rc.ch[1];
+//
+//          // 映射 x 和 y 到 -1 到 1 的范围
+//          float x_normalized = x / 660.0f;
+//          float y_normalized = y / 660.0f;
+//
+//          // 使用 atan2 计算角度
+//          target_yaw_angle = atan2f(y_normalized, x_normalized);
+//
+//          // 限制角度在 -PI 到 PI 之间
+//          if (target_yaw_angle > M_PI) {
+//              target_yaw_angle -= 2 * M_PI;
+//          } else if (target_yaw_angle < -M_PI) {
+//              target_yaw_angle += 2 * M_PI;
+//          }
+//      }
+//      now_yaw_angle=msp(motor_yaw_info.rotor_angle,0,8191,-M_PI,M_PI);//计算当前的编码器角度值，运用msp函数将编码器的值映射为弧度制
+//      //计算当前的编码器角度值，运用msp函数将编码器的值映射为弧度制，范围从0-8191映射到-pi到pi
+//      pid_calc(&gimbal_yaw_angle_pid,target_yaw_angle, now_yaw_angle);
+//      //角度环PID计算，输入目标角度和当前角度，计算输出
+//      pid_calc(&gimbal_yaw_speed_pid,gimbal_yaw_angle_pid.output, motor_yaw_info.rotor_speed);//速度环
+//      //速度环PID计算，输入目标速度（角度环的输出）和当前速度，计算输出
+//      set_GM6020_motor_voltage(&hcan1,gimbal_yaw_speed_pid.output);
+//      //can发送函数，发送经过PID计算的电压值，控制GM6020电机
 
 
       HAL_Delay(40);
