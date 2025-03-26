@@ -46,9 +46,10 @@
 /* USER CODE BEGIN PD */
 //自定义私有类型定义 (typedef)
 
+uint8_t dma_tx_complete = 1;  // DMA 传输完成标志位
 int16_t led_cnt;  // LED计数器
 extern motor_measure_t motor_chassis; // 外部定义的电机信息结构体
-extern pid_struct_t gimbal_yaw_speed_pid; // 外部定义的速度环PID结构体
+
 
 
 /* USER CODE END PD */
@@ -115,17 +116,16 @@ int main(void)
   MX_USART3_UART_Init();
   /* USER CODE BEGIN 2 */
     can_filter_init();//can初始化
-    gimbal_PID_init();//PID初始化
     remote_control_init();//遥控器初始化
     const RC_ctrl_t *rc_ctrl_point; // 声明遥控器数据指针
     char uart_buffer[256];  // 定义 UART 输出缓冲区
 
     // 初始化四个底盘电机的 PID 控制器
-    pid_struct_t motor1_pid, motor2_pid, motor3_pid, motor4_pid;
-    pid_init(&motor1_pid, 1.5, 0, 0, 30000, 16384); // 调整参数
-    pid_init(&motor2_pid, 1, 0, 0, 30000, 16384); // 调整参数
-    pid_init(&motor3_pid, 1, 0, 0, 30000, 16384); // 调整参数
-    pid_init(&motor4_pid, 1, 0, 0, 30000, 16384); // 调整参数
+    motor_pid_t motor1_pid, motor2_pid, motor3_pid, motor4_pid;
+    pid_init(&motor1_pid, 5.6, 0, 0.01, 30000, 16384); // 调整参数
+    pid_init(&motor2_pid, 4.5, 0, 0.01, 30000, 16384); // 调整参数
+    pid_init(&motor3_pid, 3.5, 0, 0.01, 30000, 16384); // 调整参数
+    pid_init(&motor4_pid, 3.5, 0, 0.01, 30000, 16384); // 调整参数
 
   /* USER CODE END 2 */
 
@@ -158,25 +158,28 @@ int main(void)
 
       // 电流控制 (将 PID 输出转换为 int16_t 类型)
 //      CAN_cmd_chassis((int16_t)output1, (int16_t)output2, (int16_t)output3, (int16_t)output4);
-      CAN_cmd_chassis((int16_t)output1,(int16_t)output2,0,0);
+      CAN_cmd_chassis(0, 0, (int16_t)output3, (int16_t)output4);
+//      CAN_cmd_chassis((int16_t)output1,(int16_t)output2,0,0);
 
 
       led_cnt ++;// LED计数器自增
-      if (led_cnt == 25)
+      if (led_cnt == 2)
       {
           led_cnt = 0;
           HAL_GPIO_TogglePin(GPIOH,GPIO_PIN_11); //blink cycle 500ms
           // 翻转GPIOH, PIN11引脚的电平，实现LED闪烁，周期为500ms (250 * 2ms)
-      }
 
 
-//          // 格式化输出电机速度到 UART1
-//          sprintf(uart_buffer, "M1:%d, M2:%d, M3:%d, M4:%d\r\n",
-//                  motor1->speed_rpm, motor2->speed_rpm, motor3->speed_rpm, motor4->speed_rpm);
-//
-//          // 通过 UART1 发送数据
-//          HAL_UART_Transmit(&huart1, (uint8_t *)uart_buffer, strlen(uart_buffer), HAL_MAX_DELAY);
+          if(dma_tx_complete == 1){
+              // 格式化输出电机速度到 UART1
+              sprintf(uart_buffer, "%d,%d,%d,%d\r\n",
+                      motor1->speed_rpm, motor2->speed_rpm, motor3->speed_rpm, motor4->speed_rpm);
 
+              // 通过 UART1 发送数据 (使用 DMA)
+              dma_tx_complete = 0;  // 重置 DMA 传输完成标志位
+              HAL_UART_Transmit_DMA(&huart1, (uint8_t *)uart_buffer, strlen(uart_buffer));
+          }
+     }
 
 
 
@@ -239,6 +242,7 @@ void SystemClock_Config(void)
   __HAL_RCC_PWR_CLK_ENABLE();
   __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
 
+
     // 先将时钟源选择为内部时钟
     RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_SYSCLK;
     RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI;
@@ -246,6 +250,7 @@ void SystemClock_Config(void)
     {
         Error_Handler();
     }
+
 
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
@@ -279,7 +284,14 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
-
+// DMA 传输完成回调函数
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
+{
+    if (huart->Instance == USART1)
+    {
+        dma_tx_complete = 1;  // 设置 DMA 传输完成标志位
+    }
+}
 /* USER CODE END 4 */
 
 /**
