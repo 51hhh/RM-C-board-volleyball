@@ -99,7 +99,8 @@ extern void CAN_cmd_chassis_reset_ID(void);
   * @retval         none
   */
 extern void CAN_cmd_chassis(int16_t motor1, int16_t motor2, int16_t motor3, int16_t motor4);
-
+extern void CAN_cmd_chassis1(int16_t motor1, int16_t motor2);
+extern void CAN_cmd_chassis2(int16_t motor3, int16_t motor4);
 /**
   * @brief          return the yaw 6020 motor data point
   * @param[in]      none

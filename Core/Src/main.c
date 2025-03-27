@@ -26,7 +26,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 // 自定义头文件
-
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 #include "bsp_can.h"
@@ -114,18 +114,25 @@ int main(void)
   MX_CAN1_Init();
   MX_USART1_UART_Init();
   MX_USART3_UART_Init();
+  MX_CAN2_Init();
   /* USER CODE BEGIN 2 */
     can_filter_init();//can初始化
     remote_control_init();//遥控器初始化
     const RC_ctrl_t *rc_ctrl_point; // 声明遥控器数据指针
     char uart_buffer[256];  // 定义 UART 输出缓冲区
 
+    // 目标速度
+    float target_speed1 = 0.0f; // rpm
+    float target_speed2 = 0.0f; // rpm
+    float target_speed3 = 0.0f; // rpm
+    float target_speed4 = 0.0f; // rpm
+
     // 初始化四个底盘电机的 PID 控制器
     motor_pid_t motor1_pid, motor2_pid, motor3_pid, motor4_pid;
-    pid_init(&motor1_pid, 5.6, 0, 0.01, 30000, 16384); // 调整参数
-    pid_init(&motor2_pid, 4.5, 0, 0.01, 30000, 16384); // 调整参数
-    pid_init(&motor3_pid, 3.5, 0, 0.01, 30000, 16384); // 调整参数
-    pid_init(&motor4_pid, 3.5, 0, 0.01, 30000, 16384); // 调整参数
+    pid_init(&motor1_pid, 4.5, 0.01, 0.0, 30000, 16384); // 调整参数
+    pid_init(&motor2_pid, 4.5, 0.01, 0.0, 30000, 16384); // 调整参数
+    pid_init(&motor3_pid, 3.5, 0.01, 0.0, 30000, 16384); // 调整参数
+    pid_init(&motor4_pid, 3.5, 0.01, 0.0, 30000, 16384); // 调整参数
 
   /* USER CODE END 2 */
 
@@ -133,21 +140,68 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+      // 获取遥控器数据指针
+      rc_ctrl_point = get_remote_control_point();
+      if (rc_ctrl_point != NULL){
+          // 获取摇杆数据
+          float z = -((float) rc_ctrl_point->rc.ch[0]); // 左右摇杆，右为正
+          float y = (float) rc_ctrl_point->rc.ch[1]; // 上下摇杆，上为正
+          float x = -((float) rc_ctrl_point->rc.ch[2]); // 旋转
+          float w = (float) rc_ctrl_point->rc.ch[3];  // 速度
+
+          // 映射摇杆数据到 -1 到 1 的范围
+          float x_normalized = x / 660.0f;
+          float y_normalized = y / 660.0f;
+          float z_normalized = z / 660.0f;
+          float w_normalized = w / 660.0f;
 
 
-//      CAN_cmd_chassis(-1000, 1000, -1000, 1000);
+          // 定义底盘速度变量
+          float Vx = 0.0f;
+          float Vy = 0.0f;
+          float Wz = 0.0f;
+
+
+          // 添加死区
+          float deadzone = 0.05f;
+          if (fabs(x_normalized) < deadzone) {
+              x_normalized = 0.0f;
+          }
+          if (fabs(y_normalized) < deadzone) {
+              y_normalized = 0.0f;
+          }
+          if (fabs(z_normalized) < deadzone) {
+              z_normalized = 0.0f;
+          }
+          if (fabs(w_normalized) < deadzone) {
+              w_normalized = 0.0f;
+          }
+
+
+
+          // 根据摇杆数据计算底盘速度
+          Vx = y_normalized;  // 上下摇杆控制前进/后退，上为正，前进
+          Vy = x_normalized;  // 左右摇杆控制左右移动，右为正，左移
+          Wz = z_normalized;  // 另一个摇杆控制旋转，正为逆时针
+
+
+
+          // 根据底盘速度计算麦克纳姆轮速度
+          target_speed1 = -(Vx + Vy + Wz)*1000*(w_normalized+1); // 右前方轮
+          target_speed2 = (Vx - Vy - Wz)*1000*(w_normalized+1); // 左前方轮
+          target_speed3 = -(Vx + Vy - Wz)*1000*(w_normalized+1); // 右后方轮
+          target_speed4 = (Vx - Vy + Wz)*1000*(w_normalized+1); // 左后方轮
+
+
+      }
+
+
 
       // 获取四个电机的速度
       const motor_measure_t *motor1 = get_chassis_motor_measure_point(0);
       const motor_measure_t *motor2 = get_chassis_motor_measure_point(1);
       const motor_measure_t *motor3 = get_chassis_motor_measure_point(2);
       const motor_measure_t *motor4 = get_chassis_motor_measure_point(3);
-
-      // 设定目标速度 (这里可以根据你的需求修改)
-      float target_speed1 = 1000.0f; // rpm
-      float target_speed2 = -1000.0f; // rpm
-      float target_speed3 = 1000.0f; // rpm
-      float target_speed4 = -1000.0f; // rpm
 
 
       // PID 计算
@@ -158,8 +212,8 @@ int main(void)
 
       // 电流控制 (将 PID 输出转换为 int16_t 类型)
 //      CAN_cmd_chassis((int16_t)output1, (int16_t)output2, (int16_t)output3, (int16_t)output4);
-      CAN_cmd_chassis(0, 0, (int16_t)output3, (int16_t)output4);
-//      CAN_cmd_chassis((int16_t)output1,(int16_t)output2,0,0);
+      CAN_cmd_chassis1((int16_t)output1,(int16_t)output2);
+      CAN_cmd_chassis2((int16_t)output3, (int16_t)output4);
 
 
       led_cnt ++;// LED计数器自增
@@ -184,39 +238,6 @@ int main(void)
 
 
 
-//      // 获取遥控器数据指针
-//      rc_ctrl_point = get_remote_control_point();
-//
-//
-//      if (rc_ctrl_point != NULL)
-//      {
-//          // 使用遥控器数据计算目标角度
-//          // 假设 ch[0] 和 ch[1] 的范围是 -660 到 660
-//          float x = (float)rc_ctrl_point->rc.ch[0];
-//          float y = (float)rc_ctrl_point->rc.ch[1];
-//
-//          // 映射 x 和 y 到 -1 到 1 的范围
-//          float x_normalized = x / 660.0f;
-//          float y_normalized = y / 660.0f;
-//
-//          // 使用 atan2 计算角度
-//          target_yaw_angle = atan2f(y_normalized, x_normalized);
-//
-//          // 限制角度在 -PI 到 PI 之间
-//          if (target_yaw_angle > M_PI) {
-//              target_yaw_angle -= 2 * M_PI;
-//          } else if (target_yaw_angle < -M_PI) {
-//              target_yaw_angle += 2 * M_PI;
-//          }
-//      }
-//      now_yaw_angle=msp(motor_yaw_info.rotor_angle,0,8191,-M_PI,M_PI);//计算当前的编码器角度值，运用msp函数将编码器的值映射为弧度制
-//      //计算当前的编码器角度值，运用msp函数将编码器的值映射为弧度制，范围从0-8191映射到-pi到pi
-//      pid_calc(&gimbal_yaw_angle_pid,target_yaw_angle, now_yaw_angle);
-//      //角度环PID计算，输入目标角度和当前角度，计算输出
-//      pid_calc(&gimbal_yaw_speed_pid,gimbal_yaw_angle_pid.output, motor_yaw_info.rotor_speed);//速度环
-//      //速度环PID计算，输入目标速度（角度环的输出）和当前速度，计算输出
-//      set_GM6020_motor_voltage(&hcan1,gimbal_yaw_speed_pid.output);
-//      //can发送函数，发送经过PID计算的电压值，控制GM6020电机
 
 
       HAL_Delay(40);
@@ -242,7 +263,6 @@ void SystemClock_Config(void)
   __HAL_RCC_PWR_CLK_ENABLE();
   __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
 
-
     // 先将时钟源选择为内部时钟
     RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_SYSCLK;
     RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI;
@@ -252,9 +272,9 @@ void SystemClock_Config(void)
     }
 
 
-  /** Initializes the RCC Oscillators according to the specified parameters
-  * in the RCC_OscInitTypeDef structure.
-  */
+    /** Initializes the RCC Oscillators according to the specified parameters
+    * in the RCC_OscInitTypeDef structure.
+    */
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;

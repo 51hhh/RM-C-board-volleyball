@@ -41,18 +41,19 @@ CMakeFiles/LED.elf.dir/Core/Src/main.c.obj: \
  D:\robotmaster\RM-C\3508\Core\Inc/dma.h \
  D:\robotmaster\RM-C\3508\Core\Inc/usart.h \
  D:\robotmaster\RM-C\3508\Core\Inc/gpio.h \
- D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/stdio.h \
+ D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/math.h \
+ D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/reent.h \
  D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/_ansi.h \
  D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/newlib.h \
  D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/config.h \
  D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/machine/ieeefp.h \
  D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/cdefs.h \
- D:/STM32/arm-none-eabi-gcc/lib/gcc/arm-none-eabi/14.2.1/include/stdarg.h \
- D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/reent.h \
- D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/_ansi.h \
  D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/_types.h \
  D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/machine/_types.h \
  D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/lock.h \
+ D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/_ansi.h \
+ D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/stdio.h \
+ D:/STM32/arm-none-eabi-gcc/lib/gcc/arm-none-eabi/14.2.1/include/stdarg.h \
  D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/stdio.h \
  D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/string.h \
  D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/_locale.h \

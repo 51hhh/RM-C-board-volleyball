@@ -164,6 +164,7 @@ CMakeFiles/LED.elf.dir/Core/Src/main.c.obj: D:/robotmaster/RM-C/3508/Core/Src/ma
   D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/machine/_default_types.h \
   D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/machine/_types.h \
   D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/machine/ieeefp.h \
+  D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/math.h \
   D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/newlib.h \
   D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/stdint.h \
   D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/stdio.h \
@@ -1305,6 +1306,8 @@ D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/_locale.h:
 D:/robotmaster/RM-C/3508/Drivers/CMSIS/Include/cmsis_gcc.h:
 
 D:/robotmaster/RM-C/3508/Drivers/CMSIS/Device/ST/STM32F4xx/Include/stm32f407xx.h:
+
+D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/math.h:
 
 D:/robotmaster/RM-C/3508/Drivers/CMSIS/Device/ST/STM32F4xx/Include/stm32f4xx.h:
 
