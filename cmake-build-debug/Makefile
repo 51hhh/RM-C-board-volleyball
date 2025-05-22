@@ -272,6 +272,30 @@ Core/Src/pid.c.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\LED.elf.dir\build.make CMakeFiles/LED.elf.dir/Core/Src/pid.c.s
 .PHONY : Core/Src/pid.c.s
 
+Core/Src/spi.obj: Core/Src/spi.c.obj
+.PHONY : Core/Src/spi.obj
+
+# target to build an object file
+Core/Src/spi.c.obj:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\LED.elf.dir\build.make CMakeFiles/LED.elf.dir/Core/Src/spi.c.obj
+.PHONY : Core/Src/spi.c.obj
+
+Core/Src/spi.i: Core/Src/spi.c.i
+.PHONY : Core/Src/spi.i
+
+# target to preprocess a source file
+Core/Src/spi.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\LED.elf.dir\build.make CMakeFiles/LED.elf.dir/Core/Src/spi.c.i
+.PHONY : Core/Src/spi.c.i
+
+Core/Src/spi.s: Core/Src/spi.c.s
+.PHONY : Core/Src/spi.s
+
+# target to generate assembly for a file
+Core/Src/spi.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\LED.elf.dir\build.make CMakeFiles/LED.elf.dir/Core/Src/spi.c.s
+.PHONY : Core/Src/spi.c.s
+
 Core/Src/stm32f4xx_hal_msp.obj: Core/Src/stm32f4xx_hal_msp.c.obj
 .PHONY : Core/Src/stm32f4xx_hal_msp.obj
 
@@ -392,6 +416,30 @@ Core/Src/system_stm32f4xx.c.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\LED.elf.dir\build.make CMakeFiles/LED.elf.dir/Core/Src/system_stm32f4xx.c.s
 .PHONY : Core/Src/system_stm32f4xx.c.s
 
+Core/Src/tim.obj: Core/Src/tim.c.obj
+.PHONY : Core/Src/tim.obj
+
+# target to build an object file
+Core/Src/tim.c.obj:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\LED.elf.dir\build.make CMakeFiles/LED.elf.dir/Core/Src/tim.c.obj
+.PHONY : Core/Src/tim.c.obj
+
+Core/Src/tim.i: Core/Src/tim.c.i
+.PHONY : Core/Src/tim.i
+
+# target to preprocess a source file
+Core/Src/tim.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\LED.elf.dir\build.make CMakeFiles/LED.elf.dir/Core/Src/tim.c.i
+.PHONY : Core/Src/tim.c.i
+
+Core/Src/tim.s: Core/Src/tim.c.s
+.PHONY : Core/Src/tim.s
+
+# target to generate assembly for a file
+Core/Src/tim.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\LED.elf.dir\build.make CMakeFiles/LED.elf.dir/Core/Src/tim.c.s
+.PHONY : Core/Src/tim.c.s
+
 Core/Src/usart.obj: Core/Src/usart.c.obj
 .PHONY : Core/Src/usart.obj
 
@@ -423,6 +471,54 @@ Core/Startup/startup_stm32f407ighx.obj: Core/Startup/startup_stm32f407ighx.s.obj
 Core/Startup/startup_stm32f407ighx.s.obj:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\LED.elf.dir\build.make CMakeFiles/LED.elf.dir/Core/Startup/startup_stm32f407ighx.s.obj
 .PHONY : Core/Startup/startup_stm32f407ighx.s.obj
+
+Core/application/BMI088Middleware.obj: Core/application/BMI088Middleware.c.obj
+.PHONY : Core/application/BMI088Middleware.obj
+
+# target to build an object file
+Core/application/BMI088Middleware.c.obj:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\LED.elf.dir\build.make CMakeFiles/LED.elf.dir/Core/application/BMI088Middleware.c.obj
+.PHONY : Core/application/BMI088Middleware.c.obj
+
+Core/application/BMI088Middleware.i: Core/application/BMI088Middleware.c.i
+.PHONY : Core/application/BMI088Middleware.i
+
+# target to preprocess a source file
+Core/application/BMI088Middleware.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\LED.elf.dir\build.make CMakeFiles/LED.elf.dir/Core/application/BMI088Middleware.c.i
+.PHONY : Core/application/BMI088Middleware.c.i
+
+Core/application/BMI088Middleware.s: Core/application/BMI088Middleware.c.s
+.PHONY : Core/application/BMI088Middleware.s
+
+# target to generate assembly for a file
+Core/application/BMI088Middleware.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\LED.elf.dir\build.make CMakeFiles/LED.elf.dir/Core/application/BMI088Middleware.c.s
+.PHONY : Core/application/BMI088Middleware.c.s
+
+Core/application/BMI088driver.obj: Core/application/BMI088driver.c.obj
+.PHONY : Core/application/BMI088driver.obj
+
+# target to build an object file
+Core/application/BMI088driver.c.obj:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\LED.elf.dir\build.make CMakeFiles/LED.elf.dir/Core/application/BMI088driver.c.obj
+.PHONY : Core/application/BMI088driver.c.obj
+
+Core/application/BMI088driver.i: Core/application/BMI088driver.c.i
+.PHONY : Core/application/BMI088driver.i
+
+# target to preprocess a source file
+Core/application/BMI088driver.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\LED.elf.dir\build.make CMakeFiles/LED.elf.dir/Core/application/BMI088driver.c.i
+.PHONY : Core/application/BMI088driver.c.i
+
+Core/application/BMI088driver.s: Core/application/BMI088driver.c.s
+.PHONY : Core/application/BMI088driver.s
+
+# target to generate assembly for a file
+Core/application/BMI088driver.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\LED.elf.dir\build.make CMakeFiles/LED.elf.dir/Core/application/BMI088driver.c.s
+.PHONY : Core/application/BMI088driver.c.s
 
 Core/application/CAN_receive.obj: Core/application/CAN_receive.c.obj
 .PHONY : Core/application/CAN_receive.obj
@@ -832,6 +928,30 @@ Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_rcc_ex.c.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\LED.elf.dir\build.make CMakeFiles/LED.elf.dir/Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_rcc_ex.c.s
 .PHONY : Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_rcc_ex.c.s
 
+Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_spi.obj: Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_spi.c.obj
+.PHONY : Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_spi.obj
+
+# target to build an object file
+Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_spi.c.obj:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\LED.elf.dir\build.make CMakeFiles/LED.elf.dir/Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_spi.c.obj
+.PHONY : Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_spi.c.obj
+
+Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_spi.i: Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_spi.c.i
+.PHONY : Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_spi.i
+
+# target to preprocess a source file
+Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_spi.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\LED.elf.dir\build.make CMakeFiles/LED.elf.dir/Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_spi.c.i
+.PHONY : Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_spi.c.i
+
+Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_spi.s: Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_spi.c.s
+.PHONY : Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_spi.s
+
+# target to generate assembly for a file
+Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_spi.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\LED.elf.dir\build.make CMakeFiles/LED.elf.dir/Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_spi.c.s
+.PHONY : Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_spi.c.s
+
 Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_tim.obj: Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_tim.c.obj
 .PHONY : Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_tim.obj
 
@@ -931,6 +1051,9 @@ help:
 	@echo ... Core/Src/pid.obj
 	@echo ... Core/Src/pid.i
 	@echo ... Core/Src/pid.s
+	@echo ... Core/Src/spi.obj
+	@echo ... Core/Src/spi.i
+	@echo ... Core/Src/spi.s
 	@echo ... Core/Src/stm32f4xx_hal_msp.obj
 	@echo ... Core/Src/stm32f4xx_hal_msp.i
 	@echo ... Core/Src/stm32f4xx_hal_msp.s
@@ -946,10 +1069,19 @@ help:
 	@echo ... Core/Src/system_stm32f4xx.obj
 	@echo ... Core/Src/system_stm32f4xx.i
 	@echo ... Core/Src/system_stm32f4xx.s
+	@echo ... Core/Src/tim.obj
+	@echo ... Core/Src/tim.i
+	@echo ... Core/Src/tim.s
 	@echo ... Core/Src/usart.obj
 	@echo ... Core/Src/usart.i
 	@echo ... Core/Src/usart.s
 	@echo ... Core/Startup/startup_stm32f407ighx.obj
+	@echo ... Core/application/BMI088Middleware.obj
+	@echo ... Core/application/BMI088Middleware.i
+	@echo ... Core/application/BMI088Middleware.s
+	@echo ... Core/application/BMI088driver.obj
+	@echo ... Core/application/BMI088driver.i
+	@echo ... Core/application/BMI088driver.s
 	@echo ... Core/application/CAN_receive.obj
 	@echo ... Core/application/CAN_receive.i
 	@echo ... Core/application/CAN_receive.s
@@ -1001,6 +1133,9 @@ help:
 	@echo ... Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_rcc_ex.obj
 	@echo ... Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_rcc_ex.i
 	@echo ... Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_rcc_ex.s
+	@echo ... Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_spi.obj
+	@echo ... Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_spi.i
+	@echo ... Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_spi.s
 	@echo ... Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_tim.obj
 	@echo ... Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_tim.i
 	@echo ... Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_tim.s

@@ -35,10 +35,15 @@ CMakeFiles/LED.elf.dir/Core/Src/main.c.obj: \
  D:\robotmaster\RM-C\3508\Drivers\STM32F4xx_HAL_Driver\Inc/stm32f4xx_hal_flash_ramfunc.h \
  D:\robotmaster\RM-C\3508\Drivers\STM32F4xx_HAL_Driver\Inc/stm32f4xx_hal_pwr.h \
  D:\robotmaster\RM-C\3508\Drivers\STM32F4xx_HAL_Driver\Inc/stm32f4xx_hal_pwr_ex.h \
+ D:\robotmaster\RM-C\3508\Drivers\STM32F4xx_HAL_Driver\Inc/stm32f4xx_hal_spi.h \
+ D:\robotmaster\RM-C\3508\Drivers\STM32F4xx_HAL_Driver\Inc/stm32f4xx_hal_tim.h \
+ D:\robotmaster\RM-C\3508\Drivers\STM32F4xx_HAL_Driver\Inc/stm32f4xx_hal_tim_ex.h \
  D:\robotmaster\RM-C\3508\Drivers\STM32F4xx_HAL_Driver\Inc/stm32f4xx_hal_uart.h \
  D:\robotmaster\RM-C\3508\Core\Inc/can.h \
  D:\robotmaster\RM-C\3508\Core\Inc/main.h \
  D:\robotmaster\RM-C\3508\Core\Inc/dma.h \
+ D:\robotmaster\RM-C\3508\Core\Inc/spi.h \
+ D:\robotmaster\RM-C\3508\Core\Inc/tim.h \
  D:\robotmaster\RM-C\3508\Core\Inc/usart.h \
  D:\robotmaster\RM-C\3508\Core\Inc/gpio.h \
  D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/math.h \
@@ -65,4 +70,5 @@ CMakeFiles/LED.elf.dir/Core/Src/main.c.obj: \
  D:/robotmaster/RM-C/3508/Core/application/CAN_receive.h \
  D:/robotmaster/RM-C/3508/Core/application/struct_typedef.h \
  D:/robotmaster/RM-C/3508/Core/application/remote_control.h \
- D:/robotmaster/RM-C/3508/Core/application/bsp_rc.h
+ D:/robotmaster/RM-C/3508/Core/application/bsp_rc.h \
+ D:/robotmaster/RM-C/3508/Core/application/BMI088driver.h

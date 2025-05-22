@@ -20,6 +20,8 @@
 #include "main.h"
 #include "can.h"
 #include "dma.h"
+#include "spi.h"
+#include "tim.h"
 #include "usart.h"
 #include "gpio.h"
 
@@ -33,6 +35,7 @@
 #include "pid.h"
 #include "../application/CAN_receive.h"
 #include "../application/remote_control.h"
+#include "../application/BMI088driver.h"
 
 
 /* USER CODE END Includes */
@@ -67,6 +70,68 @@ double msp(double x, double in_min, double in_max, double out_min, double out_ma
 {
     return (x-in_min)*(out_max-out_min)/(in_max-in_min)+out_min;
 }
+
+// BMI088 变量定义
+fp32 gyro[3], accel[3], temp;
+
+
+// 全局变量
+float accel_x, accel_y, accel_z; // 加速度计测量值
+float accel_x_true, accel_y_true, accel_z_true; // 真实加速度
+float accel_x_bias = 0.0f, accel_y_bias = 0.0f, accel_z_bias = 0.0f; // 加速度计零偏
+
+
+// 卡尔曼滤波参数 (需要根据实际情况调整)
+float Q_accel = 0.001f; // 过程噪声 (加速度)
+float Q_bias = 0.00001f; // 过程噪声 (零偏)
+float R_accel_meas = 0.01f; // 测量噪声 (加速度计)
+
+float P[2][2] = {{1.0f, 0.0f}, {0.0f, 1.0f}}; // 初始状态协方差矩阵
+
+// 卡尔曼滤波更新 (单轴)
+void kalman_filter_accel(float measured_accel, float *true_accel, float *bias, int axis) {
+    // 1. 预测步骤
+    float F[2][2] = {{1.0f, 0.0f}, {0.0f, 1.0f}}; // 状态转移矩阵
+    float x_hat[2] = {*true_accel, *bias}; // 状态向量
+
+    // 预测状态
+    float x_hat_predicted[2];
+    x_hat_predicted[0] = F[0][0] * x_hat[0] + F[0][1] * x_hat[1];
+    x_hat_predicted[1] = F[1][0] * x_hat[0] + F[1][1] * x_hat[1];
+
+    // 预测协方差矩阵
+    float P_predicted[2][2];
+    P_predicted[0][0] = F[0][0] * P[0][0] * F[0][0] + F[0][1] * P[1][0] * F[0][0] + F[0][0] * P[0][1] * F[1][0] + F[0][1] * P[1][1] * F[1][0] + Q_accel;
+    P_predicted[0][1] = F[0][0] * P[0][0] * F[0][1] + F[0][1] * P[1][0] * F[0][1] + F[0][0] * P[0][1] * F[1][1] + F[0][1] * P[1][1] * F[1][1];
+    P_predicted[1][0] = F[1][0] * P[0][0] * F[0][0] + F[1][1] * P[1][0] * F[0][0] + F[1][0] * P[0][1] * F[1][0] + F[1][1] * P[1][1] * F[1][0];
+    P_predicted[1][1] = F[1][0] * P[0][0] * F[0][1] + F[1][1] * P[1][0] * F[0][1] + F[1][0] * P[0][1] * F[1][1] + F[1][1] * P[1][1] * F[1][1] + Q_bias;
+
+    // 2. 更新步骤
+    float H[1][2] = {{1.0f, 1.0f}}; // 测量矩阵
+    float z = measured_accel; // 测量值
+
+    // 计算残差
+    float y = z - (H[0][0] * x_hat_predicted[0] + H[0][1] * x_hat_predicted[1]);
+
+    // 计算残差协方差
+    float S = H[0][0] * P_predicted[0][0] * H[0][0] + H[0][1] * P_predicted[1][0] * H[0][0] + H[0][0] * P_predicted[0][1] * H[0][1] + H[0][1] * P_predicted[1][1] * H[0][1] + R_accel_meas;
+
+    // 计算卡尔曼增益
+    float K[2];
+    K[0] = (P_predicted[0][0] * H[0][0] + P_predicted[0][1] * H[0][1]) / S;
+    K[1] = (P_predicted[1][0] * H[0][0] + P_predicted[1][1] * H[0][1]) / S;
+
+    // 更新状态估计
+    *true_accel = x_hat_predicted[0] + K[0] * y;
+    *bias = x_hat_predicted[1] + K[1] * y;
+
+    // 更新协方差矩阵
+    P[0][0] = (1 - K[0] * H[0][0]) * P_predicted[0][0] - K[0] * H[0][1] * P_predicted[1][0];
+    P[0][1] = (1 - K[0] * H[0][0]) * P_predicted[0][1] - K[0] * H[0][1] * P_predicted[1][1];
+    P[1][0] = -K[1] * H[0][0] * P_predicted[0][0] + (1 - K[1] * H[0][1]) * P_predicted[1][0];
+    P[1][1] = -K[1] * H[0][0] * P_predicted[0][1] + (1 - K[1] * H[0][1]) * P_predicted[1][1];
+}
+
 
 /* USER CODE END PV */
 
@@ -115,11 +180,15 @@ int main(void)
   MX_USART1_UART_Init();
   MX_USART3_UART_Init();
   MX_CAN2_Init();
+  MX_SPI1_Init();
+  MX_TIM10_Init();
   /* USER CODE BEGIN 2 */
-    can_filter_init();//can初始化
-    remote_control_init();//遥控器初始化
-    const RC_ctrl_t *rc_ctrl_point; // 声明遥控器数据指针
-    char uart_buffer[256];  // 定义 UART 输出缓冲区
+
+    while (BMI088_init());              // BMI088 初始化
+    can_filter_init();                  //can初始化
+    remote_control_init();              //遥控器初始化
+    const RC_ctrl_t *rc_ctrl_point;     // 声明遥控器数据指针
+    char uart_buffer[256];              // 定义 UART 输出缓冲区
 
     // 目标速度
     float target_speed1 = 0.0f; // rpm
@@ -215,6 +284,21 @@ int main(void)
       CAN_cmd_chassis1((int16_t)output1,(int16_t)output2);
       CAN_cmd_chassis2((int16_t)output3, (int16_t)output4);
 
+      // BMI088读取
+      BMI088_read(gyro, accel, &temp);
+
+
+
+      accel_x = accel[0];
+      accel_y = accel[1];
+      accel_z = accel[2];
+
+
+      // 卡尔曼滤波
+      kalman_filter_accel(accel_x, &accel_x_true, &accel_x_bias, 0);
+      kalman_filter_accel(accel_y, &accel_y_true, &accel_y_bias, 1);
+      kalman_filter_accel(accel_z, &accel_z_true, &accel_z_bias, 2);
+
 
       led_cnt ++;// LED计数器自增
       if (led_cnt == 2)
@@ -225,12 +309,31 @@ int main(void)
 
 
           if(dma_tx_complete == 1){
-              // 格式化输出电机速度到 UART1
+
+              // 电机速度格式化
               sprintf(uart_buffer, "%d,%d,%d,%d\r\n",
                       motor1->speed_rpm, motor2->speed_rpm, motor3->speed_rpm, motor4->speed_rpm);
 
+
+              // IMU数值格式化
+//              sprintf(uart_buffer, "Gyro: %.11f, %.11f, %.11f  Accel: %.11f, %.11f, %.11f\r\n",
+//                      gyro[0], gyro[1], gyro[2], accel[0], accel[1], accel[2]);
+//              sprintf(uart_buffer, "Gyro: %.11f, %.11f, %.11f\r\n",
+//                      gyro[0], gyro[1], gyro[2]);
+              // 原始数据
+//              sprintf(uart_buffer, "Accel: %.11f, %.11f, %.11f\r\n",
+//                      accel[0], accel[1], accel[2]);
+              // 卡尔曼滤波
+              sprintf(uart_buffer, "Accel: %.11f, %.11f, %.11f\r\n",
+                      accel_x_true, accel_y_true, accel_z_true);
+
+
+
+
               // 通过 UART1 发送数据 (使用 DMA)
               dma_tx_complete = 0;  // 重置 DMA 传输完成标志位
+              // HAL_UART_Transmit_DMA(&huart1, (uint8_t *)uart_buffer, strlen(uart_buffer));
+
               HAL_UART_Transmit_DMA(&huart1, (uint8_t *)uart_buffer, strlen(uart_buffer));
           }
      }
@@ -240,7 +343,9 @@ int main(void)
 
 
 
-      HAL_Delay(40);
+//      HAL_Delay(40);
+
+
 
     /* USER CODE END WHILE */
 
@@ -271,10 +376,9 @@ void SystemClock_Config(void)
         Error_Handler();
     }
 
-
-    /** Initializes the RCC Oscillators according to the specified parameters
-    * in the RCC_OscInitTypeDef structure.
-    */
+  /** Initializes the RCC Oscillators according to the specified parameters
+  * in the RCC_OscInitTypeDef structure.
+  */
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;

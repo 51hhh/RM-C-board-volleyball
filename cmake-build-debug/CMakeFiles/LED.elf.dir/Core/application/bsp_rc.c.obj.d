@@ -37,4 +37,7 @@ CMakeFiles/LED.elf.dir/Core/application/bsp_rc.c.obj: \
  D:\robotmaster\RM-C\3508\Drivers\STM32F4xx_HAL_Driver\Inc/stm32f4xx_hal_flash_ramfunc.h \
  D:\robotmaster\RM-C\3508\Drivers\STM32F4xx_HAL_Driver\Inc/stm32f4xx_hal_pwr.h \
  D:\robotmaster\RM-C\3508\Drivers\STM32F4xx_HAL_Driver\Inc/stm32f4xx_hal_pwr_ex.h \
+ D:\robotmaster\RM-C\3508\Drivers\STM32F4xx_HAL_Driver\Inc/stm32f4xx_hal_spi.h \
+ D:\robotmaster\RM-C\3508\Drivers\STM32F4xx_HAL_Driver\Inc/stm32f4xx_hal_tim.h \
+ D:\robotmaster\RM-C\3508\Drivers\STM32F4xx_HAL_Driver\Inc/stm32f4xx_hal_tim_ex.h \
  D:\robotmaster\RM-C\3508\Drivers\STM32F4xx_HAL_Driver\Inc/stm32f4xx_hal_uart.h
