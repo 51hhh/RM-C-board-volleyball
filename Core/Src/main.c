@@ -71,6 +71,10 @@ double msp(double x, double in_min, double in_max, double out_min, double out_ma
     return (x-in_min)*(out_max-out_min)/(in_max-in_min)+out_min;
 }
 
+// 状态机s
+int type=3;
+
+
 // BMI088 变量定义
 fp32 gyro[3], accel[3], temp;
 
@@ -79,7 +83,14 @@ fp32 gyro[3], accel[3], temp;
 float accel_x, accel_y, accel_z; // 加速度计测量值
 float accel_x_true, accel_y_true, accel_z_true; // 真实加速度
 float accel_x_bias = 0.0f, accel_y_bias = 0.0f, accel_z_bias = 0.0f; // 加速度计零偏
+uint32_t previous_time_stamp = 0; // 上一次的时间戳
+uint32_t current_time_stamp = 0;  // 当前的时间戳
 
+// Wz 保持控制
+float current_angle = 0.0f;   // 当前方向角度
+float current_angle_err = 0.0f; // 零飘
+motor_pid_t wz_pid;          // 用于 Wz 轴回正的 PID 控制器
+float target_wz = 0.0f;     // 目标Wz值，即0
 
 // 卡尔曼滤波参数 (需要根据实际情况调整)
 float Q_accel = 0.001f; // 过程噪声 (加速度)
@@ -183,10 +194,13 @@ int main(void)
   MX_SPI1_Init();
   MX_TIM10_Init();
   /* USER CODE BEGIN 2 */
+    // 时间刻初始化
+    current_time_stamp = HAL_GetTick();
+    previous_time_stamp  = HAL_GetTick();
 
     while (BMI088_init());              // BMI088 初始化
-    can_filter_init();                  //can初始化
-    remote_control_init();              //遥控器初始化
+    can_filter_init();                  // can初始化
+    remote_control_init();              // 遥控器初始化
     const RC_ctrl_t *rc_ctrl_point;     // 声明遥控器数据指针
     char uart_buffer[256];              // 定义 UART 输出缓冲区
 
@@ -203,67 +217,126 @@ int main(void)
     pid_init(&motor3_pid, 3.5, 0.01, 0.0, 30000, 16384); // 调整参数
     pid_init(&motor4_pid, 3.5, 0.01, 0.0, 30000, 16384); // 调整参数
 
+    // Wz 正对方向pid控制
+    pid_init(&wz_pid, 1.5, 0.00, 0.0, 500, 660);
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+      // 时间刻记录
+      current_time_stamp = HAL_GetTick();
+
+      // BMI088读取
+      BMI088_read(gyro, accel, &temp);
+
       // 获取遥控器数据指针
       rc_ctrl_point = get_remote_control_point();
+
       if (rc_ctrl_point != NULL){
-          // 获取摇杆数据
-          float z = -((float) rc_ctrl_point->rc.ch[0]); // 左右摇杆，右为正
-          float y = (float) rc_ctrl_point->rc.ch[1]; // 上下摇杆，上为正
-          float x = -((float) rc_ctrl_point->rc.ch[2]); // 旋转
-          float w = (float) rc_ctrl_point->rc.ch[3];  // 速度
+          // 遥控右拨杆控制
+          char s = rc_ctrl_point->rc.s[0];
+          if (s == '\003' | s == '\000'){type=3;}       // 初始0位中档3位 失能
+          if (s == '\001'){type=1;}                     // 上拨1位 遥控控制
+          if (s == '\002'){type=0;}                     // 下拨2位 角度保持
+      }
 
-          // 映射摇杆数据到 -1 到 1 的范围
-          float x_normalized = x / 660.0f;
-          float y_normalized = y / 660.0f;
-          float z_normalized = z / 660.0f;
-          float w_normalized = w / 660.0f;
+      // 初始化
+      if (type == 0){
+          if (current_time_stamp>2000){
+              current_angle_err = current_angle /1000;
+              current_angle = 0;
+              type = 2;
+          }
+          if (current_time_stamp>1000){
+              current_angle += gyro[2] * ( current_time_stamp - previous_time_stamp );            // 积分得到当前角度 (gyro[2] 是 Z 轴角速度)
+          }
+      }
+
+      if (type == 1){
+          if (rc_ctrl_point != NULL){
+              // 获取摇杆数据
+              float z = -((float) rc_ctrl_point->rc.ch[0]); // 左右摇杆，右为正
+              float y = (float) rc_ctrl_point->rc.ch[1]; // 上下摇杆，上为正
+              float x = -((float) rc_ctrl_point->rc.ch[2]); // 旋转
+              float w = (float) rc_ctrl_point->rc.ch[3];  // 速度
+
+              // 映射摇杆数据到 -1 到 1 的范围
+              float x_normalized = x / 660.0f;
+              float y_normalized = y / 660.0f;
+              float z_normalized = z / 660.0f;
+              float w_normalized = w / 660.0f;
 
 
+              // 定义底盘速度变量
+              float Vx = 0.0f;
+              float Vy = 0.0f;
+              float Wz = 0.0f;
+
+
+              // 添加死区
+              float deadzone = 0.05f;
+              if (fabs(x_normalized) < deadzone) {
+                  x_normalized = 0.0f;
+              }
+              if (fabs(y_normalized) < deadzone) {
+                  y_normalized = 0.0f;
+              }
+              if (fabs(z_normalized) < deadzone) {
+                  z_normalized = 0.0f;
+              }
+              if (fabs(w_normalized) < deadzone) {
+                  w_normalized = 0.0f;
+              }
+
+
+
+              // 根据摇杆数据计算底盘速度
+              Vx = y_normalized;  // 上下摇杆控制前进/后退，上为正，前进
+              Vy = x_normalized;  // 左右摇杆控制左右移动，右为正，左移
+              Wz = z_normalized;  // 另一个摇杆控制旋转，正为逆时针
+
+
+
+              // 根据底盘速度计算麦克纳姆轮速度
+              target_speed1 = -(Vx + Vy + Wz)*1000*(w_normalized+1); // 右前方轮
+              target_speed2 = (Vx - Vy - Wz)*1000*(w_normalized+1); // 左前方轮
+              target_speed3 = -(Vx + Vy - Wz)*1000*(w_normalized+1); // 右后方轮
+              target_speed4 = (Vx - Vy + Wz)*1000*(w_normalized+1); // 左后方轮
+
+
+          }
+      }
+      // 状态二底盘Wz维持
+      if (type == 2){
           // 定义底盘速度变量
           float Vx = 0.0f;
           float Vy = 0.0f;
           float Wz = 0.0f;
 
 
-          // 添加死区
-          float deadzone = 0.05f;
-          if (fabs(x_normalized) < deadzone) {
-              x_normalized = 0.0f;
-          }
-          if (fabs(y_normalized) < deadzone) {
-              y_normalized = 0.0f;
-          }
-          if (fabs(z_normalized) < deadzone) {
-              z_normalized = 0.0f;
-          }
-          if (fabs(w_normalized) < deadzone) {
-              w_normalized = 0.0f;
-          }
+          // Wz 控制
+          float dt = current_time_stamp - previous_time_stamp;
+          current_angle += (gyro[2] * dt) - (dt * current_angle_err);            // 积分得到当前角度 (gyro[2] 是 Z 轴角速度)
 
-
-
-          // 根据摇杆数据计算底盘速度
-          Vx = y_normalized;  // 上下摇杆控制前进/后退，上为正，前进
-          Vy = x_normalized;  // 左右摇杆控制左右移动，右为正，左移
-          Wz = z_normalized;  // 另一个摇杆控制旋转，正为逆时针
-
-
+          float wz_compensation = pid_calc(&wz_pid, target_wz, current_angle);// 计算 PID 控制器输出，用于补偿 Wz
+          Wz = wz_compensation;
 
           // 根据底盘速度计算麦克纳姆轮速度
-          target_speed1 = -(Vx + Vy + Wz)*1000*(w_normalized+1); // 右前方轮
-          target_speed2 = (Vx - Vy - Wz)*1000*(w_normalized+1); // 左前方轮
-          target_speed3 = -(Vx + Vy - Wz)*1000*(w_normalized+1); // 右后方轮
-          target_speed4 = (Vx - Vy + Wz)*1000*(w_normalized+1); // 左后方轮
-
+          target_speed1 = -(Vx + Vy + Wz)*1000; // 右前方轮
+          target_speed2 = (Vx - Vy - Wz)*1000; // 左前方轮
+          target_speed3 = -(Vx + Vy - Wz)*1000; // 右后方轮
+          target_speed4 = (Vx - Vy + Wz)*1000; // 左后方轮
 
       }
-
+      if (type == 3){
+          target_speed1 = 0; // 右前方轮
+          target_speed2 = 0; // 左前方轮
+          target_speed3 = 0; // 右后方轮
+          target_speed4 = 0; // 左后方轮
+      }
 
 
       // 获取四个电机的速度
@@ -280,12 +353,11 @@ int main(void)
       float output4 = pid_calc(&motor4_pid, target_speed4, motor4->speed_rpm);
 
       // 电流控制 (将 PID 输出转换为 int16_t 类型)
-//      CAN_cmd_chassis((int16_t)output1, (int16_t)output2, (int16_t)output3, (int16_t)output4);
-      CAN_cmd_chassis1((int16_t)output1,(int16_t)output2);
-      CAN_cmd_chassis2((int16_t)output3, (int16_t)output4);
+      CAN_cmd_chassis((int16_t)output1, (int16_t)output2, (int16_t)output3, (int16_t)output4);
+//      CAN_cmd_chassis1((int16_t)output1,(int16_t)output2);
+//      CAN_cmd_chassis2((int16_t)output3, (int16_t)output4);
 
-      // BMI088读取
-      BMI088_read(gyro, accel, &temp);
+
 
 
 
@@ -298,6 +370,7 @@ int main(void)
       kalman_filter_accel(accel_x, &accel_x_true, &accel_x_bias, 0);
       kalman_filter_accel(accel_y, &accel_y_true, &accel_y_bias, 1);
       kalman_filter_accel(accel_z, &accel_z_true, &accel_z_bias, 2);
+
 
 
       led_cnt ++;// LED计数器自增
@@ -318,14 +391,14 @@ int main(void)
               // IMU数值格式化
 //              sprintf(uart_buffer, "Gyro: %.11f, %.11f, %.11f  Accel: %.11f, %.11f, %.11f\r\n",
 //                      gyro[0], gyro[1], gyro[2], accel[0], accel[1], accel[2]);
-//              sprintf(uart_buffer, "Gyro: %.11f, %.11f, %.11f\r\n",
-//                      gyro[0], gyro[1], gyro[2]);
+              sprintf(uart_buffer, "Gyro: %.11f, %.11f, %.11f, %.11f\r\n",
+                      gyro[0], gyro[1], gyro[2],current_angle);
               // 原始数据
 //              sprintf(uart_buffer, "Accel: %.11f, %.11f, %.11f\r\n",
 //                      accel[0], accel[1], accel[2]);
               // 卡尔曼滤波
-              sprintf(uart_buffer, "Accel: %.11f, %.11f, %.11f\r\n",
-                      accel_x_true, accel_y_true, accel_z_true);
+//              sprintf(uart_buffer, "Accel: %.11f, %.11f, %.11f\r\n",
+//                      accel_x_true, accel_y_true, accel_z_true);
 
 
 
@@ -350,6 +423,7 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+      previous_time_stamp = current_time_stamp;
   }
   /* USER CODE END 3 */
 }
@@ -367,14 +441,6 @@ void SystemClock_Config(void)
   */
   __HAL_RCC_PWR_CLK_ENABLE();
   __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
-
-    // 先将时钟源选择为内部时钟
-    RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_SYSCLK;
-    RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI;
-    if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_5) != HAL_OK)
-    {
-        Error_Handler();
-    }
 
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
