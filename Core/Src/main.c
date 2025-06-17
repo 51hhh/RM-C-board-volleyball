@@ -49,9 +49,37 @@
 /* USER CODE BEGIN PD */
 //自定义私有类型定义 (typedef)
 
+#define UART_QUEUE_SIZE 32
+
+typedef struct {
+    char buffer[128];
+    uint16_t length;
+} uart_queue_item_t;
+
+uart_queue_item_t uart_queue[UART_QUEUE_SIZE];
+uint16_t uart_queue_head = 0;
+uint16_t uart_queue_tail = 0;
 uint8_t dma_tx_complete = 1;  // DMA 传输完成标志位
 int16_t led_cnt;  // LED计数器
 extern motor_measure_t motor_chassis; // 外部定义的电机信息结构体
+
+void uart_queue_send(const char* data, uint16_t length) {
+    if ((uart_queue_head + 1) % UART_QUEUE_SIZE != uart_queue_tail) {
+        strncpy(uart_queue[uart_queue_head].buffer, data, length);
+        uart_queue[uart_queue_head].length = length;
+        uart_queue_head = (uart_queue_head + 1) % UART_QUEUE_SIZE;
+    }
+}
+
+void process_uart_queue(void) {
+    if (dma_tx_complete && uart_queue_tail != uart_queue_head) {
+        dma_tx_complete = 0;
+        HAL_UART_Transmit_DMA(&huart1, 
+                            (uint8_t *)uart_queue[uart_queue_tail].buffer, 
+                            uart_queue[uart_queue_tail].length);
+        uart_queue_tail = (uart_queue_tail + 1) % UART_QUEUE_SIZE;
+    }
+}
 
 
 
@@ -391,8 +419,12 @@ int main(void)
               // IMU数值格式化
 //              sprintf(uart_buffer, "Gyro: %.11f, %.11f, %.11f  Accel: %.11f, %.11f, %.11f\r\n",
 //                      gyro[0], gyro[1], gyro[2], accel[0], accel[1], accel[2]);
-              sprintf(uart_buffer, "Gyro: %.11f, %.11f, %.11f, %.11f\r\n",
-                      gyro[0], gyro[1], gyro[2],current_angle);
+
+
+//              sprintf(uart_buffer, "Gyro: %.11f, %.11f, %.11f, %.11f\r\n",
+//                      gyro[0], gyro[1], gyro[2],current_angle);
+
+
               // 原始数据
 //              sprintf(uart_buffer, "Accel: %.11f, %.11f, %.11f\r\n",
 //                      accel[0], accel[1], accel[2]);
@@ -403,11 +435,7 @@ int main(void)
 
 
 
-              // 通过 UART1 发送数据 (使用 DMA)
-              dma_tx_complete = 0;  // 重置 DMA 传输完成标志位
-              // HAL_UART_Transmit_DMA(&huart1, (uint8_t *)uart_buffer, strlen(uart_buffer));
-
-              HAL_UART_Transmit_DMA(&huart1, (uint8_t *)uart_buffer, strlen(uart_buffer));
+          process_uart_queue();
           }
      }
 
@@ -480,6 +508,35 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
     if (huart->Instance == USART1)
     {
         dma_tx_complete = 1;  // 设置 DMA 传输完成标志位
+    }
+}
+
+/* PB12中断回调函数 */
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+    if(GPIO_Pin == GPIO_PIN_12) {
+        static uint32_t last_interrupt_time = 0;
+        uint32_t current_time = HAL_GetTick();
+        char temp_buffer[64];
+        
+        // 消抖处理(50ms)
+        if(current_time - last_interrupt_time > 50) {
+            // 翻转LED作为调试指示
+            HAL_GPIO_TogglePin(GPIOH, GPIO_PIN_10);
+            
+            if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_12) == GPIO_PIN_SET) {
+                // 上升沿触发
+                snprintf(temp_buffer, sizeof(temp_buffer), 
+                        "[INT] PB12 Rising Edge at %lums\r\n", current_time);
+            } else {
+                // 下降沿触发
+                snprintf(temp_buffer, sizeof(temp_buffer), 
+                        "[INT] PB12 Falling Edge at %lums\r\n", current_time);
+            }
+            
+            uart_queue_send(temp_buffer, strlen(temp_buffer));
+            last_interrupt_time = current_time;
+        }
     }
 }
 /* USER CODE END 4 */
