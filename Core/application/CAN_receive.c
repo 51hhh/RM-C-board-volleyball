@@ -19,6 +19,15 @@
 
 #include "CAN_receive.h"
 #include "main.h"
+#include <string.h>
+#include <stdbool.h>
+
+/* 无符号整型转浮点型 */
+static float uint_to_float(uint16_t val, float min, float max, uint8_t bits)
+{
+    float offset = (max - min) / (1 << bits);
+    return min + (float)val * offset;
+}
 
 
 
@@ -79,12 +88,32 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
             get_motor_measure(&motor_chassis[i], rx_data);
             break;
         }
-
+        case 0x00: // 达妙电机反馈帧即master id
+        {
+            static motor_t dm_motor;
+            dm_motor_fbdata(&dm_motor, rx_data);
+            break;
+        }
         default:
         {
             break;
         }
     }
+}
+
+/* 达妙电机反馈数据解析 */
+void dm_motor_fbdata(motor_t *motor, uint8_t *rx_data)
+{
+    motor->para.id = (rx_data[0])&0x0F;
+    motor->para.state = (rx_data[0])>>4;
+    motor->para.p_int=(rx_data[1]<<8)|rx_data[2];
+    motor->para.v_int=(rx_data[3]<<4)|(rx_data[4]>>4);
+    motor->para.t_int=((rx_data[4]&0xF)<<8)|rx_data[5];
+    motor->para.pos = uint_to_float(motor->para.p_int, -motor->tmp.PMAX, motor->tmp.PMAX, 16); // (-12.5,12.5)
+    motor->para.vel = uint_to_float(motor->para.v_int, -motor->tmp.VMAX, motor->tmp.VMAX, 12); // (-45.0,45.0)
+    motor->para.tor = uint_to_float(motor->para.t_int, -motor->tmp.TMAX, motor->tmp.TMAX, 12); // (-18.0,18.0)
+    motor->para.Tmos = (float)(rx_data[6]);
+    motor->para.Tcoil = (float)(rx_data[7]);
 }
 
 
@@ -283,3 +312,93 @@ const motor_measure_t *get_chassis_motor_measure_point(uint8_t i)
 {
     return &motor_chassis[(i & 0x03)];
 }
+
+
+
+// 达妙电机控制函数
+
+/**
+  * @brief          control motor position and velocity in position-velocity mode
+  * @param[in]      can_id: motor CAN ID
+  * @param[in]      pos: target position (float, little-endian)
+  * @param[in]      vel: target velocity (float, little-endian)
+  * @retval         none
+  */
+/**
+  * @brief          位置速度模式控制电机
+  * @param[in]      can_id: 电机CAN ID
+  * @param[in]      pos: 目标位置(浮点数，小端序)
+  * @param[in]      vel: 目标速度(浮点数，小端序)
+  * @retval         none
+  */
+void CAN_cmd_motor_pos_vel_control(uint16_t can_id, float pos, float vel)
+{
+    uint32_t send_mail_box;
+    uint8_t *pos_ptr = (uint8_t*)&pos;
+    uint8_t *vel_ptr = (uint8_t*)&vel;
+    
+    gimbal_tx_message.StdId = can_id + 0x100; // 位置速度模式偏移0x100
+    gimbal_tx_message.IDE = CAN_ID_STD;
+    gimbal_tx_message.RTR = CAN_RTR_DATA;
+    gimbal_tx_message.DLC = 0x08;
+    
+    // 填充位置数据(小端序)
+    gimbal_can_send_data[0] = pos_ptr[0];
+    gimbal_can_send_data[1] = pos_ptr[1];
+    gimbal_can_send_data[2] = pos_ptr[2];
+    gimbal_can_send_data[3] = pos_ptr[3];
+    
+    // 填充速度数据(小端序)
+    gimbal_can_send_data[4] = vel_ptr[0];
+    gimbal_can_send_data[5] = vel_ptr[1];
+    gimbal_can_send_data[6] = vel_ptr[2];
+    gimbal_can_send_data[7] = vel_ptr[3];
+    
+    HAL_CAN_AddTxMessage(&GIMBAL_CAN, &gimbal_tx_message, gimbal_can_send_data, &send_mail_box);
+}
+
+
+
+/**
+  * @brief          enable motor with specified CAN ID and mode offset
+  * @param[in]      can_id: motor CAN ID
+  * @param[in]      mode_offset: mode offset ID (0x00, 0x100, 0x200, 0x300)
+  * @retval         none
+  */
+/**
+  * @brief          使能指定CAN ID和模式偏移的电机
+  * @param[in]      can_id: 电机CAN ID
+  * @param[in]      mode_offset: 模式偏移ID (0x00, 0x100, 0x200, 0x300)
+  * @retval         none
+  */
+/**
+  * @brief          control motor enable/disable with specified CAN ID and mode offset
+  * @param[in]      can_id: motor CAN ID
+  * @param[in]      mode_offset: mode offset ID (0x00, 0x100, 0x200, 0x300)
+  * @param[in]      enable: True to enable, False to disable
+  * @retval         none
+  */
+/**
+  * @brief          控制电机使能/失能
+  * @param[in]      can_id: 电机CAN ID
+  * @param[in]      mode_offset: 模式偏移ID (0x00, 0x100, 0x200, 0x300)
+  * @param[in]      enable: True为使能，False为失能
+  * @retval         none
+  */
+void CAN_cmd_motor_control(uint16_t can_id, uint16_t mode_offset, bool enable)
+{
+    uint32_t send_mail_box;
+    gimbal_tx_message.StdId = can_id + mode_offset;
+    gimbal_tx_message.IDE = CAN_ID_STD;
+    gimbal_tx_message.RTR = CAN_RTR_DATA;
+    gimbal_tx_message.DLC = 0x08;
+    
+    /* 填充前7字节为0xFF */
+    memset(gimbal_can_send_data, 0xFF, 7);
+    /* 根据enable参数设置第8字节 */
+    gimbal_can_send_data[7] = enable ? 0xFC : 0xFD;
+    
+    HAL_CAN_AddTxMessage(&GIMBAL_CAN, &gimbal_tx_message, gimbal_can_send_data, &send_mail_box);
+}
+
+

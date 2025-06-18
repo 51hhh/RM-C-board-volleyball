@@ -21,6 +21,7 @@
 #define CAN_RECEIVE_H
 
 #include "struct_typedef.h"
+#include <stdbool.h>
 
 #define CHASSIS_CAN hcan1
 #define GIMBAL_CAN hcan2
@@ -149,5 +150,83 @@ extern const motor_measure_t *get_trigger_motor_measure_point(void);
   */
 extern const motor_measure_t *get_chassis_motor_measure_point(uint8_t i);
 
+/* 达妙电机参数结构体 */
+typedef struct {
+    uint8_t id;
+    uint8_t state;
+    uint16_t p_int;
+    uint16_t v_int;
+    uint16_t t_int;
+    float pos;
+    float vel;
+    float tor;
+    float Tmos;
+    float Tcoil;
+} motor_para_t;
+
+/* 达妙电机控制参数结构体 */
+typedef struct {
+    uint8_t mode;
+    float pos_set;
+    float vel_set;
+    float tor_set;
+    float cur_set;
+    float kp_set;
+    float kd_set;
+} motor_ctrl_t;
+
+/* 达妙电机临时参数结构体 */
+typedef struct {
+    float PMAX;
+    float VMAX;
+    float TMAX;
+    uint8_t read_flag;
+} motor_tmp_t;
+
+/* 达妙电机结构体 */
+typedef struct {
+    motor_para_t para;
+    motor_ctrl_t ctrl;
+    motor_tmp_t tmp;
+    uint8_t id;
+    uint8_t mst_id;
+} motor_t;
+
+// 达妙电机反馈数据解析函数
+extern void dm_motor_fbdata(motor_t *motor, uint8_t *rx_data);
+
+// 达妙电机控制函数
+
+/**
+  * @brief          control motor enable/disable with specified CAN ID and mode offset
+  * @param[in]      can_id: motor CAN ID
+  * @param[in]      mode_offset: mode offset ID (0x00, 0x100, 0x200, 0x300)
+  * @param[in]      enable: True to enable, False to disable
+  * @retval         none
+  */
+/**
+  * @brief          控制电机使能/失能
+  * @param[in]      can_id: 电机CAN ID
+  * @param[in]      mode_offset: 模式偏移ID (0x00, 0x100, 0x200, 0x300)
+  * @param[in]      enable: True为使能，False为失能
+  * @retval         none
+  */
+extern void CAN_cmd_motor_control(uint16_t can_id, uint16_t mode_offset, bool enable);
+
+/**
+  * @brief          control motor position and velocity in position-velocity mode
+  * @param[in]      can_id: motor CAN ID
+  * @param[in]      pos: target position (float, little-endian)
+  * @param[in]      vel: target velocity (float, little-endian)
+  * @retval         none
+  */
+/**
+  * @brief          位置速度模式控制电机
+  * @param[in]      can_id: 电机CAN ID
+  * @param[in]      pos: 目标位置(浮点数，小端序)
+  * @param[in]      vel: 目标速度(浮点数，小端序)
+  * @retval         none
+  */
+extern void CAN_cmd_motor_pos_vel_control(uint16_t can_id, float pos, float vel);
 
 #endif

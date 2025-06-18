@@ -69,6 +69,7 @@ CMakeFiles/LED.elf.dir/Core/Src/main.c.obj: \
  D:\robotmaster\RM-C\3508\Core\Inc/pid.h \
  D:/robotmaster/RM-C/3508/Core/application/CAN_receive.h \
  D:/robotmaster/RM-C/3508/Core/application/struct_typedef.h \
+ D:/STM32/arm-none-eabi-gcc/lib/gcc/arm-none-eabi/14.2.1/include/stdbool.h \
  D:/robotmaster/RM-C/3508/Core/application/remote_control.h \
  D:/robotmaster/RM-C/3508/Core/application/bsp_rc.h \
  D:/robotmaster/RM-C/3508/Core/application/BMI088driver.h

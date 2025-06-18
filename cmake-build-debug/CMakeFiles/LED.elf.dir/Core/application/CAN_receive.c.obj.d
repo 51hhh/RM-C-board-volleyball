@@ -2,6 +2,7 @@ CMakeFiles/LED.elf.dir/Core/application/CAN_receive.c.obj: \
  D:\robotmaster\RM-C\3508\Core\application\CAN_receive.c \
  D:\robotmaster\RM-C\3508\Core\application\CAN_receive.h \
  D:\robotmaster\RM-C\3508\Core\application\struct_typedef.h \
+ D:/STM32/arm-none-eabi-gcc/lib/gcc/arm-none-eabi/14.2.1/include/stdbool.h \
  D:\robotmaster\RM-C\3508\Core\Inc/main.h \
  D:\robotmaster\RM-C\3508\Drivers\STM32F4xx_HAL_Driver\Inc/stm32f4xx_hal.h \
  D:\robotmaster\RM-C\3508\Core\Inc/stm32f4xx_hal_conf.h \
@@ -40,4 +41,18 @@ CMakeFiles/LED.elf.dir/Core/application/CAN_receive.c.obj: \
  D:\robotmaster\RM-C\3508\Drivers\STM32F4xx_HAL_Driver\Inc/stm32f4xx_hal_spi.h \
  D:\robotmaster\RM-C\3508\Drivers\STM32F4xx_HAL_Driver\Inc/stm32f4xx_hal_tim.h \
  D:\robotmaster\RM-C\3508\Drivers\STM32F4xx_HAL_Driver\Inc/stm32f4xx_hal_tim_ex.h \
- D:\robotmaster\RM-C\3508\Drivers\STM32F4xx_HAL_Driver\Inc/stm32f4xx_hal_uart.h
+ D:\robotmaster\RM-C\3508\Drivers\STM32F4xx_HAL_Driver\Inc/stm32f4xx_hal_uart.h \
+ D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/string.h \
+ D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/_ansi.h \
+ D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/newlib.h \
+ D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/config.h \
+ D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/machine/ieeefp.h \
+ D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/reent.h \
+ D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/_ansi.h \
+ D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/cdefs.h \
+ D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/_types.h \
+ D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/machine/_types.h \
+ D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/lock.h \
+ D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/_locale.h \
+ D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/strings.h \
+ D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/string.h

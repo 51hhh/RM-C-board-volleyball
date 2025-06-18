@@ -240,13 +240,23 @@ int main(void)
 
     // 初始化四个底盘电机的 PID 控制器
     motor_pid_t motor1_pid, motor2_pid, motor3_pid, motor4_pid;
-    pid_init(&motor1_pid, 4.5, 0.01, 0.0, 30000, 16384); // 调整参数
-    pid_init(&motor2_pid, 4.5, 0.01, 0.0, 30000, 16384); // 调整参数
+    pid_init(&motor1_pid, 3.5, 0.01, 0.0, 30000, 16384); // 调整参数
+    pid_init(&motor2_pid, 3.5, 0.01, 0.0, 30000, 16384); // 调整参数
     pid_init(&motor3_pid, 3.5, 0.01, 0.0, 30000, 16384); // 调整参数
     pid_init(&motor4_pid, 3.5, 0.01, 0.0, 30000, 16384); // 调整参数
 
     // Wz 正对方向pid控制
     pid_init(&wz_pid, 1.5, 0.00, 0.0, 500, 660);
+
+
+    // 初始化达妙电机使能
+    CAN_cmd_motor_control(0x1,0x100,true);
+    CAN_cmd_motor_control(0x2,0x100,true);
+    CAN_cmd_motor_control(0x3,0x100,true);
+    
+
+
+
 
   /* USER CODE END 2 */
 
@@ -469,6 +479,15 @@ void SystemClock_Config(void)
   */
   __HAL_RCC_PWR_CLK_ENABLE();
   __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
+
+    // 先将时钟源选择为内部时钟
+    RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_SYSCLK;
+    RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI;
+    if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_5) != HAL_OK)
+    {
+        Error_Handler();
+    }
+
 
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
