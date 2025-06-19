@@ -194,6 +194,7 @@ CMakeFiles/LED.elf.dir/Core/Src/main.c.obj: D:/robotmaster/RM-C/3508/Core/Src/ma
   D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/stdio.h \
   D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/string.h \
   D:/STM32/arm-none-eabi-gcc/lib/gcc/arm-none-eabi/14.2.1/include/stdarg.h \
+  D:/STM32/arm-none-eabi-gcc/lib/gcc/arm-none-eabi/14.2.1/include/stdbool.h \
   D:/STM32/arm-none-eabi-gcc/lib/gcc/arm-none-eabi/14.2.1/include/stddef.h \
   D:/STM32/arm-none-eabi-gcc/lib/gcc/arm-none-eabi/14.2.1/include/stdint.h \
   D:/robotmaster/RM-C/3508/Core/application/BMI088driver.h \
@@ -692,12 +693,26 @@ CMakeFiles/LED.elf.dir/Core/application/BMI088driver.c.obj: D:/robotmaster/RM-C/
   D:/robotmaster/RM-C/3508/Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_uart.h
 
 CMakeFiles/LED.elf.dir/Core/application/CAN_receive.c.obj: D:/robotmaster/RM-C/3508/Core/application/CAN_receive.c \
+  D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/_ansi.h \
   D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/_newlib_version.h \
   D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/machine/_default_types.h \
+  D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/machine/_types.h \
+  D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/machine/ieeefp.h \
+  D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/newlib.h \
   D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/stdint.h \
+  D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/string.h \
+  D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/strings.h \
   D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/_intsup.h \
+  D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/_locale.h \
   D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/_stdint.h \
+  D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/_types.h \
+  D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/cdefs.h \
+  D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/config.h \
   D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/features.h \
+  D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/lock.h \
+  D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/reent.h \
+  D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/string.h \
+  D:/STM32/arm-none-eabi-gcc/lib/gcc/arm-none-eabi/14.2.1/include/stdbool.h \
   D:/STM32/arm-none-eabi-gcc/lib/gcc/arm-none-eabi/14.2.1/include/stddef.h \
   D:/STM32/arm-none-eabi-gcc/lib/gcc/arm-none-eabi/14.2.1/include/stdint.h \
   D:/robotmaster/RM-C/3508/Core/Inc/main.h \
@@ -1679,6 +1694,8 @@ D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/config.h:
 D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/lock.h:
 
 D:/STM32/arm-none-eabi-gcc/lib/gcc/arm-none-eabi/14.2.1/include/stdarg.h:
+
+D:/STM32/arm-none-eabi-gcc/lib/gcc/arm-none-eabi/14.2.1/include/stdbool.h:
 
 D:/robotmaster/RM-C/3508/Core/application/CAN_receive.h:
 

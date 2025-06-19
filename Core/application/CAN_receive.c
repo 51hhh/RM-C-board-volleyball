@@ -43,6 +43,16 @@ extern CAN_HandleTypeDef hcan2;
         (ptr)->given_current = (uint16_t)((data)[4] << 8 | (data)[5]);  \
         (ptr)->temperate = (data)[6];                                   \
     }
+// 电机反馈状态结构体
+typedef struct {
+    bool enabled;
+    bool feedback_received;
+    uint32_t last_send_time;
+} motor_feedback_state_t;
+
+// 电机反馈状态数组(支持3个电机)
+static motor_feedback_state_t motor_feedback_states[3] = {0};
+
 /*
 motor data,  0:chassis motor1 3508;1:chassis motor3 3508;2:chassis motor3 3508;3:chassis motor4 3508;
 4:yaw gimbal motor 6020;5:pitch gimbal motor 6020;6:trigger motor 2006;
@@ -92,6 +102,12 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
         {
             static motor_t dm_motor;
             dm_motor_fbdata(&dm_motor, rx_data);
+            
+            // 更新电机反馈状态
+            uint8_t motor_id = dm_motor.para.id;
+            if (motor_id >= 1 && motor_id <= 3) {
+                motor_feedback_states[motor_id - 1].feedback_received = true;
+            }
             break;
         }
         default:
@@ -336,8 +352,8 @@ void CAN_cmd_motor_pos_vel_control(uint16_t can_id, float pos, float vel)
     uint32_t send_mail_box;
     uint8_t *pos_ptr = (uint8_t*)&pos;
     uint8_t *vel_ptr = (uint8_t*)&vel;
-    
-    gimbal_tx_message.StdId = can_id + 0x100; // 位置速度模式偏移0x100
+
+    gimbal_tx_message.StdId = can_id;
     gimbal_tx_message.IDE = CAN_ID_STD;
     gimbal_tx_message.RTR = CAN_RTR_DATA;
     gimbal_tx_message.DLC = 0x08;
@@ -388,6 +404,30 @@ void CAN_cmd_motor_pos_vel_control(uint16_t can_id, float pos, float vel)
 void CAN_cmd_motor_control(uint16_t can_id, uint16_t mode_offset, bool enable)
 {
     uint32_t send_mail_box;
+    uint8_t motor_index = can_id - 1; // 电机ID转换为数组索引(1->0, 2->1, 3->2)
+    
+    if (enable) {
+        // 检查电机是否已经使能并收到反馈
+        if (motor_feedback_states[motor_index].enabled && 
+            motor_feedback_states[motor_index].feedback_received) {
+            return; // 已经使能并收到反馈，不再发送
+        }
+        
+        // 检查上次发送时间，避免频繁发送
+        if (HAL_GetTick() - motor_feedback_states[motor_index].last_send_time < 100) {
+            return; // 发送间隔太短，跳过
+        }
+        
+        // 更新状态
+        motor_feedback_states[motor_index].enabled = true;
+        motor_feedback_states[motor_index].feedback_received = false;
+        motor_feedback_states[motor_index].last_send_time = HAL_GetTick();
+    } else {
+        // 失能电机时重置状态
+        motor_feedback_states[motor_index].enabled = false;
+        motor_feedback_states[motor_index].feedback_received = false;
+    }
+
     gimbal_tx_message.StdId = can_id + mode_offset;
     gimbal_tx_message.IDE = CAN_ID_STD;
     gimbal_tx_message.RTR = CAN_RTR_DATA;
