@@ -698,6 +698,7 @@ CMakeFiles/LED.elf.dir/Core/application/CAN_receive.c.obj: D:/robotmaster/RM-C/3
   D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/machine/_default_types.h \
   D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/machine/_types.h \
   D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/machine/ieeefp.h \
+  D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/math.h \
   D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/newlib.h \
   D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/stdint.h \
   D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/string.h \

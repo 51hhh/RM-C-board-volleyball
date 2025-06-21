@@ -490,7 +490,6 @@ void SystemClock_Config(void)
         Error_Handler();
     }
 
-
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */

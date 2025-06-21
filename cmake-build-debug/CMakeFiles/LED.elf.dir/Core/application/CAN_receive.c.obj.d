@@ -55,4 +55,5 @@ CMakeFiles/LED.elf.dir/Core/application/CAN_receive.c.obj: \
  D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/lock.h \
  D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/_locale.h \
  D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/strings.h \
- D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/string.h
+ D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/string.h \
+ D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/math.h
