@@ -227,6 +227,6 @@ extern void CAN_cmd_motor_control(uint16_t can_id, uint16_t mode_offset, bool en
   * @param[in]      vel: 目标速度(浮点数，小端序)
   * @retval         none
   */
-extern void CAN_cmd_motor_pos_vel_control(uint16_t can_id, float pos, float vel);
+extern void CAN_cmd_motor_pos_vel_control( float pos, float vel);
 
 #endif

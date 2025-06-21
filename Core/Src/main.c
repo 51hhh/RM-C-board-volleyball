@@ -260,9 +260,9 @@ int main(void)
   while (1)
   {
       // 初始化达妙电机使能
-//      CAN_cmd_motor_control(0x1,0x100,true);
-//      CAN_cmd_motor_control(0x2,0x100,true);
-//      CAN_cmd_motor_control(0x3,0x100,true);
+     CAN_cmd_motor_control(0x1,0x100,true);
+     CAN_cmd_motor_control(0x2,0x100,true);
+     CAN_cmd_motor_control(0x3,0x100,true);
 
 
 
@@ -547,17 +547,15 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
             
             if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_12) == GPIO_PIN_SET) {
                 // 上升沿触发
-//                CAN_cmd_motor_pos_vel_control(0x101,0,0.5);
-//                CAN_cmd_motor_pos_vel_control(0x102,0,0.5);
-//                CAN_cmd_motor_pos_vel_control(0x103,0,0.5);
+                CAN_cmd_motor_pos_vel_control(0,0.5);
+
 
                 snprintf(temp_buffer, sizeof(temp_buffer), 
                         "[INT] PB12 Rising Edge at %lums\r\n", current_time);
             } else {
                 // 下降沿触发
-//                CAN_cmd_motor_pos_vel_control(0x101,0.5,0.5);
-//                CAN_cmd_motor_pos_vel_control(0x102,0.5,0.5);
-//                CAN_cmd_motor_pos_vel_control(0x103,0.5,0.5);
+               CAN_cmd_motor_pos_vel_control(0.5,0.5);
+
 
                 snprintf(temp_buffer, sizeof(temp_buffer), 
                         "[INT] PB12 Falling Edge at %lums\r\n", current_time);

@@ -20,6 +20,7 @@
 #include "CAN_receive.h"
 #include "main.h"
 #include <string.h>
+#include <math.h>
 #include <stdbool.h>
 
 /* 无符号整型转浮点型 */
@@ -48,6 +49,8 @@ typedef struct {
     bool enabled;
     bool feedback_received;
     uint32_t last_send_time;
+    float last_pos;
+    float last_vel;
 } motor_feedback_state_t;
 
 // 电机反馈状态数组(支持3个电机)
@@ -106,7 +109,10 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
             // 更新电机反馈状态
             uint8_t motor_id = dm_motor.para.id;
             if (motor_id >= 1 && motor_id <= 3) {
-                motor_feedback_states[motor_id - 1].feedback_received = true;
+                uint8_t index = motor_id - 1;
+                motor_feedback_states[index].feedback_received = true;
+                motor_feedback_states[index].last_pos = dm_motor.para.pos;
+                motor_feedback_states[index].last_vel = dm_motor.para.vel;
             }
             break;
         }
@@ -347,30 +353,69 @@ const motor_measure_t *get_chassis_motor_measure_point(uint8_t i)
   * @param[in]      vel: 目标速度(浮点数，小端序)
   * @retval         none
   */
-void CAN_cmd_motor_pos_vel_control(uint16_t can_id, float pos, float vel)
+void CAN_cmd_motor_pos_vel_control(float pos, float vel)
 {
-    uint32_t send_mail_box;
-    uint8_t *pos_ptr = (uint8_t*)&pos;
-    uint8_t *vel_ptr = (uint8_t*)&vel;
+    // 位置和速度变化阈值(避免因浮点精度问题频繁重发)
+    const float POS_THRESHOLD = 0.001f;
+    const float VEL_THRESHOLD = 0.001f;
+    
+    for (uint8_t i = 0; i < 3; i++) {
+        // 检查是否需要发送(位置/速度变化或未收到反馈)
+        bool need_send = !motor_feedback_states[i].feedback_received || 
+                        (fabsf(pos - motor_feedback_states[i].last_pos) > POS_THRESHOLD) ||
+                        (fabsf(vel - motor_feedback_states[i].last_vel) > VEL_THRESHOLD);
+        
+        // 检查发送间隔(最小100ms)
+        bool time_ok = (HAL_GetTick() - motor_feedback_states[i].last_send_time) >= 100;
+        
+        if (need_send && time_ok) {
+            uint8_t *pos_ptr = (uint8_t*)&pos;
+            uint8_t *vel_ptr = (uint8_t*)&vel;
 
-    gimbal_tx_message.StdId = can_id;
-    gimbal_tx_message.IDE = CAN_ID_STD;
-    gimbal_tx_message.RTR = CAN_RTR_DATA;
-    gimbal_tx_message.DLC = 0x08;
-    
-    // 填充位置数据(小端序)
-    gimbal_can_send_data[0] = pos_ptr[0];
-    gimbal_can_send_data[1] = pos_ptr[1];
-    gimbal_can_send_data[2] = pos_ptr[2];
-    gimbal_can_send_data[3] = pos_ptr[3];
-    
-    // 填充速度数据(小端序)
-    gimbal_can_send_data[4] = vel_ptr[0];
-    gimbal_can_send_data[5] = vel_ptr[1];
-    gimbal_can_send_data[6] = vel_ptr[2];
-    gimbal_can_send_data[7] = vel_ptr[3];
-    
-    HAL_CAN_AddTxMessage(&GIMBAL_CAN, &gimbal_tx_message, gimbal_can_send_data, &send_mail_box);
+            // 设置CAN消息头(固定值)
+            gimbal_tx_message.IDE = CAN_ID_STD;
+            gimbal_tx_message.RTR = CAN_RTR_DATA;
+            gimbal_tx_message.DLC = 0x08;
+            gimbal_tx_message.StdId = 0x101 + i; // CAN ID从0x101到0x103
+            
+            // 填充位置数据(小端序)
+            gimbal_can_send_data[0] = pos_ptr[0];
+            gimbal_can_send_data[1] = pos_ptr[1];
+            gimbal_can_send_data[2] = pos_ptr[2];
+            gimbal_can_send_data[3] = pos_ptr[3];
+            
+            // 填充速度数据(小端序)
+            gimbal_can_send_data[4] = vel_ptr[0];
+            gimbal_can_send_data[5] = vel_ptr[1];
+            gimbal_can_send_data[6] = vel_ptr[2];
+            gimbal_can_send_data[7] = vel_ptr[3];
+            
+            // 检查三个邮箱状态，选择空闲邮箱发送
+            HAL_StatusTypeDef send_status = HAL_ERROR;
+            uint32_t mailbox;
+
+            // 尝试三个邮箱
+            for (mailbox = CAN_TX_MAILBOX0; mailbox <= CAN_TX_MAILBOX2; mailbox++) {
+                if (HAL_CAN_IsTxMessagePending(&GIMBAL_CAN, mailbox) == HAL_OK) {
+                    send_status = HAL_CAN_AddTxMessage(&GIMBAL_CAN, &gimbal_tx_message,
+                                                     gimbal_can_send_data, &mailbox);
+                    if (send_status == HAL_OK) {
+                        break; // 发送成功则退出循环
+                    }
+                }
+            }
+            
+
+            
+            // 发送成功后更新状态
+            if (send_status == HAL_OK) {
+                motor_feedback_states[i].last_send_time = HAL_GetTick();
+                motor_feedback_states[i].feedback_received = false;
+                motor_feedback_states[i].last_pos = pos;
+                motor_feedback_states[i].last_vel = vel;
+            }
+        }
+    }
 }
 
 
