@@ -3,6 +3,13 @@ CMakeFiles/LED.elf.dir/Core/application/CAN_receive.c.obj: \
  D:\robotmaster\RM-C\3508\Core\application\CAN_receive.h \
  D:\robotmaster\RM-C\3508\Core\application\struct_typedef.h \
  D:/STM32/arm-none-eabi-gcc/lib/gcc/arm-none-eabi/14.2.1/include/stdbool.h \
+ D:/STM32/arm-none-eabi-gcc/lib/gcc/arm-none-eabi/14.2.1/include/stdint.h \
+ D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/stdint.h \
+ D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/machine/_default_types.h \
+ D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/features.h \
+ D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/_newlib_version.h \
+ D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/_intsup.h \
+ D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/_stdint.h \
  D:\robotmaster\RM-C\3508\Core\Inc/main.h \
  D:\robotmaster\RM-C\3508\Drivers\STM32F4xx_HAL_Driver\Inc/stm32f4xx_hal.h \
  D:\robotmaster\RM-C\3508\Core\Inc/stm32f4xx_hal_conf.h \
@@ -11,13 +18,6 @@ CMakeFiles/LED.elf.dir/Core/application/CAN_receive.c.obj: \
  D:\robotmaster\RM-C\3508\Drivers\CMSIS\Device\ST\STM32F4xx\Include/stm32f4xx.h \
  D:\robotmaster\RM-C\3508\Drivers\CMSIS\Device\ST\STM32F4xx\Include/stm32f407xx.h \
  D:\robotmaster\RM-C\3508\Drivers\CMSIS\Include/core_cm4.h \
- D:/STM32/arm-none-eabi-gcc/lib/gcc/arm-none-eabi/14.2.1/include/stdint.h \
- D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/stdint.h \
- D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/machine/_default_types.h \
- D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/features.h \
- D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/_newlib_version.h \
- D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/_intsup.h \
- D:/STM32/arm-none-eabi-gcc/arm-none-eabi/include/sys/_stdint.h \
  D:\robotmaster\RM-C\3508\Drivers\CMSIS\Include/cmsis_version.h \
  D:\robotmaster\RM-C\3508\Drivers\CMSIS\Include/cmsis_compiler.h \
  D:\robotmaster\RM-C\3508\Drivers\CMSIS\Include/cmsis_gcc.h \

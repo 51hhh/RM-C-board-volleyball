@@ -63,6 +63,8 @@ uint8_t dma_tx_complete = 1;  // DMA 传输完成标志位
 int16_t led_cnt;  // LED计数器
 extern motor_measure_t motor_chassis; // 外部定义的电机信息结构体
 
+
+// uart 消息发送添加队列函数
 void uart_queue_send(const char* data, uint16_t length) {
     if ((uart_queue_head + 1) % UART_QUEUE_SIZE != uart_queue_tail) {
         strncpy(uart_queue[uart_queue_head].buffer, data, length);
@@ -250,21 +252,25 @@ int main(void)
 
 
 
+    //初始化电机控制参数
+    DM4340_Control_Init(0);  // ID 0x01电机PID控制器初始化
+    DM4340_Control_Init(1);
+    DM4340_Control_Init(2);
 
-
-
-  /* USER CODE END 2 */
+    /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-      // 初始化达妙电机使能
-     CAN_cmd_motor_control(0x1,0x100,true);
-     CAN_cmd_motor_control(0x2,0x100,true);
-     CAN_cmd_motor_control(0x3,0x100,true);
+      // DM电机使能
+      CAN_cmd_motor_control(0x1,0,true);
+      CAN_cmd_motor_control(0x2,0,true);
+      CAN_cmd_motor_control(0x3,0,true);
 
-
+      DM4340_Control_Loop(0);  // 执行PID计算
+      DM4340_Control_Loop(1);
+      DM4340_Control_Loop(2);
 
       // 时间刻记录
       current_time_stamp = HAL_GetTick();
@@ -412,6 +418,17 @@ int main(void)
       kalman_filter_accel(accel_z, &accel_z_true, &accel_z_bias, 2);
 
 
+      // 电机速度格式化
+//      sprintf(uart_buffer, "%d,%d,%d,%d\r\n",
+//              motor1->speed_rpm, motor2->speed_rpm, motor3->speed_rpm, motor4->speed_rpm);
+//      uart_queue_send(uart_buffer,strlen(uart_buffer));
+
+      // 输出dm电机参数
+      s_motor_data_t *motor = &DM4340_Date[0];
+      sprintf(uart_buffer, "%f,%f,%f,%f\r\n",
+              motor->esc_back_position, motor->f_p, motor->esc_back_speed, motor->out_current);
+      uart_queue_send(uart_buffer,strlen(uart_buffer));
+
 
       led_cnt ++;// LED计数器自增
       if (led_cnt == 2)
@@ -422,32 +439,8 @@ int main(void)
 
 
           if(dma_tx_complete == 1){
-
-              // 电机速度格式化
-              sprintf(uart_buffer, "%d,%d,%d,%d\r\n",
-                      motor1->speed_rpm, motor2->speed_rpm, motor3->speed_rpm, motor4->speed_rpm);
-
-
-              // IMU数值格式化
-//              sprintf(uart_buffer, "Gyro: %.11f, %.11f, %.11f  Accel: %.11f, %.11f, %.11f\r\n",
-//                      gyro[0], gyro[1], gyro[2], accel[0], accel[1], accel[2]);
-
-
-//              sprintf(uart_buffer, "Gyro: %.11f, %.11f, %.11f, %.11f\r\n",
-//                      gyro[0], gyro[1], gyro[2],current_angle);
-
-
-              // 原始数据
-//              sprintf(uart_buffer, "Accel: %.11f, %.11f, %.11f\r\n",
-//                      accel[0], accel[1], accel[2]);
-              // 卡尔曼滤波
-//              sprintf(uart_buffer, "Accel: %.11f, %.11f, %.11f\r\n",
-//                      accel_x_true, accel_y_true, accel_z_true);
-
-
-
-
-          process_uart_queue();
+              // 处理uart消息队列
+              process_uart_queue();
           }
      }
 
@@ -546,15 +539,16 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
             
             if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_12) == GPIO_PIN_SET) {
                 // 上升沿触发
-                CAN_cmd_motor_pos_vel_control(0,0.5);
+
 
 
                 snprintf(temp_buffer, sizeof(temp_buffer), 
                         "[INT] PB12 Rising Edge at %lums\r\n", current_time);
             } else {
                 // 下降沿触发
-               CAN_cmd_motor_pos_vel_control(0.5,0.5);
 
+                // 设置目标角度(弧度)
+                DM4340_Set_Target_Angle(0, PI/4);
 
                 snprintf(temp_buffer, sizeof(temp_buffer), 
                         "[INT] PB12 Falling Edge at %lums\r\n", current_time);

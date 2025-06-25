@@ -22,9 +22,26 @@
 
 #include "struct_typedef.h"
 #include <stdbool.h>
+#include <stdint.h>
 
 #define CHASSIS_CAN hcan1
 #define GIMBAL_CAN hcan2
+
+/* DM4340 motor parameters */
+#define DM4340_P_MIN -12.5f // 位置最小值
+#define DM4340_P_MAX 12.5f  // 位置最大值
+#define DM4340_V_MIN -10.0f   // 速度最小值
+#define DM4340_V_MAX 10.0f    // 速度最大值
+#define DM4340_KP_MIN 0.0f    // Kp最小值
+#define DM4340_KP_MAX 500.0f  // Kp最大值
+#define DM4340_KD_MIN 0.0f    // Kd最小值
+#define DM4340_KD_MAX 5.0f    // Kd最大值
+#define DM4340_T_MIN -10.0f   // 转矩最大值
+#define DM4340_T_MAX 10.0f    // 转矩最小值
+
+/* Math constants */
+#define PI 3.141592653589793f
+#define PI_2 6.283185307179586f
 
 /* CAN send and receive ID */
 typedef enum
@@ -39,6 +56,14 @@ typedef enum
     CAN_PIT_MOTOR_ID = 0x206,
     CAN_TRIGGER_MOTOR_ID = 0x207,
     CAN_GIMBAL_ALL_ID = 0x1FF,
+
+    /* DM4340 motor IDs */
+    DM4340_M1_MATER  = 0x01,
+    DM4340_M2_MATER  = 0x02,
+    DM4340_M3_MATER  = 0x03,
+    DM4340_M1 = 0x11,
+    DM4340_M2 = 0x12,
+    DM4340_M3 = 0x13,
 
 } can_msg_id_e;
 
@@ -150,50 +175,47 @@ extern const motor_measure_t *get_trigger_motor_measure_point(void);
   */
 extern const motor_measure_t *get_chassis_motor_measure_point(uint8_t i);
 
-/* 达妙电机参数结构体 */
-typedef struct {
-    uint8_t id;
-    uint8_t state;
-    uint16_t p_int;
-    uint16_t v_int;
-    uint16_t t_int;
-    float pos;
-    float vel;
-    float tor;
+/* DM4340电机数据结构 (从vb_3wheel迁移) */
+typedef struct 
+{
+    int id;                // 帧ID
+    int state;             // 状态
+
+    float f_kp;            // 位置环增益
+    float f_p;             // 位置环偏差
+    float f_kd;            // 速度环增益
+    float f_v;            // 速度环偏差
+    float f_t;            // 转矩
+
+    int p_int;
+    int v_int;
+    int t_int;
+    int kp_int;
+    int kd_int;
+    float esc_back_position; // 返回的位置
+    float esc_back_speed;    // 反馈速度
+    float esc_back_current;  // 反馈电流/扭矩
+    float esc_back_angle;    // 反馈角度
+    float Kp;
+    float Kd;
     float Tmos;
     float Tcoil;
-} motor_para_t;
 
-/* 达妙电机控制参数结构体 */
-typedef struct {
-    uint8_t mode;
-    float pos_set;
-    float vel_set;
-    float tor_set;
-    float cur_set;
-    float kp_set;
-    float kd_set;
-} motor_ctrl_t;
+    float esc_back_position_last; // 上一次返回的位置
+    int64_t circle_num;           // 旋转圈数
+    float serial_position;        // 总码盘值
+    float serial_angle;           // 总角度
+    float serial_angle_last;      // 上一次的总角度
+    float real_angle;             // 上电零点第一次反馈位置esc_back_position
 
-/* 达妙电机临时参数结构体 */
-typedef struct {
-    float PMAX;
-    float VMAX;
-    float TMAX;
-    uint8_t read_flag;
-} motor_tmp_t;
+    float target_speed; // 目标速度
+    float set_speed;    // 设置速度
+    double target_position; // 目标位置
+    float target_angle;     // 目标角度
+    int target_state;
 
-/* 达妙电机结构体 */
-typedef struct {
-    motor_para_t para;
-    motor_ctrl_t ctrl;
-    motor_tmp_t tmp;
-    uint8_t id;
-    uint8_t mst_id;
-} motor_t;
-
-// 达妙电机反馈数据解析函数
-extern void dm_motor_fbdata(motor_t *motor, uint8_t *rx_data);
+    float out_current; // 输出电流
+} s_motor_data_t;
 
 // 达妙电机控制函数
 
@@ -228,5 +250,15 @@ extern void CAN_cmd_motor_control(uint16_t can_id, uint16_t mode_offset, bool en
   * @retval         none
   */
 extern void CAN_cmd_motor_pos_vel_control( float pos, float vel);
+
+/* DM4340 motor control functions */
+extern void MD4340_motor_PID_Control(uint32_t id, float torq);
+extern s_motor_data_t DM4340_Date[3]; // DM4340电机数据数组声明
+extern void MD_CanReceive(s_motor_data_t *motor, uint8_t RxDate[8]);
+
+/* 封装的DM4340控制接口 */
+void DM4340_Control_Init(uint8_t motor_id);  // 初始化PID参数
+void DM4340_Set_Target_Angle(uint8_t motor_id, float angle); // 设置目标角度
+void DM4340_Control_Loop(uint8_t motor_id);  // 执行控制循环
 
 #endif

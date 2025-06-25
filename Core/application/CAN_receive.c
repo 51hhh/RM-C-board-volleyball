@@ -23,11 +23,44 @@
 #include <math.h>
 #include <stdbool.h>
 
-/* 无符号整型转浮点型 */
-static float uint_to_float(uint16_t val, float min, float max, uint8_t bits)
+/* 数值限制函数 */
+static float constrain(float value, float min, float max)
 {
-    float offset = (max - min) / (1 << bits);
-    return min + (float)val * offset;
+    if(value < min) return min;
+    if(value > max) return max;
+    return value;
+}
+
+// 帧率统计结构体
+typedef struct {
+    uint32_t DM4340_M1;
+    uint32_t DM4340_M2;
+    uint32_t DM4340_M3;
+} FPS_t;
+
+static FPS_t FPS = {0};
+
+/* 无符号整型转浮点型 */
+static float uint_to_float(int x_int, float x_min, float x_max, int bits)
+{
+    float span = x_max - x_min;
+    float offset = x_min;
+    return ((float)x_int) * span / ((float)((1 << bits) - 1)) + offset;
+}
+
+/**
+  * @brief          Convert float to unsigned int with range mapping
+  * @param[in]      x: input value
+  * @param[in]      x_min: minimum range
+  * @param[in]      x_max: maximum range
+  * @param[in]      bits: bit width
+  * @retval         converted value
+  */
+static uint16_t float_to_uint(float x, float x_min, float x_max, uint8_t bits)
+{
+    float span = x_max - x_min;
+    float offset = x - x_min;
+    return (uint16_t)((offset / span) * ((1 << bits) - 1));
 }
 
 
@@ -46,11 +79,11 @@ extern CAN_HandleTypeDef hcan2;
     }
 // 电机反馈状态结构体
 typedef struct {
-    bool enabled;
-    bool feedback_received;
-    uint32_t last_send_time;
-    float last_pos;
-    float last_vel;
+    bool enabled;               // 电机是否启用
+    bool feedback_received;     // 是否接收到反馈
+    uint32_t last_send_time;    // 上一次发送时间
+    float last_pos;             // 上一次位置
+    float last_vel;             // 上一次速度
 } motor_feedback_state_t;
 
 // 电机反馈状态数组(支持3个电机)
@@ -62,6 +95,7 @@ motor data,  0:chassis motor1 3508;1:chassis motor3 3508;2:chassis motor3 3508;3
 电机数据, 0:底盘电机1 3508电机,  1:底盘电机2 3508电机,2:底盘电机3 3508电机,3:底盘电机4 3508电机;
 4:yaw云台电机 6020电机; 5:pitch云台电机 6020电机; 6:拨弹电机 2006电机*/
 static motor_measure_t motor_chassis[7];
+s_motor_data_t DM4340_Date[3]; // DM4340电机数据数组，支持3个电机
 
 static CAN_TxHeaderTypeDef  gimbal_tx_message;
 static uint8_t              gimbal_can_send_data[8];
@@ -80,63 +114,91 @@ static uint8_t              chassis_can_send_data[8];
   */
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 {
-    CAN_RxHeaderTypeDef rx_header;
-    uint8_t rx_data[8];
+    CAN_RxHeaderTypeDef rx_header_can1, rx_header_can2;
+    uint8_t rx_data_can1[8];
+    uint8_t rx_data_can2[8];
 
-    HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &rx_header, rx_data);
+    // CAN1接收数据处理
+    if (hcan->Instance == CAN1){
+      HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &rx_header_can1, rx_data_can1); // 从FIFO中接收消息至rx_header_can1
 
-    switch (rx_header.StdId)
+      switch (rx_header_can1.StdId)
+      {
+          case CAN_3508_M1_ID:
+          case CAN_3508_M2_ID:
+          case CAN_3508_M3_ID:
+          case CAN_3508_M4_ID:
+          case CAN_YAW_MOTOR_ID:
+          case CAN_PIT_MOTOR_ID:
+          case CAN_TRIGGER_MOTOR_ID:
+          {
+              static uint8_t i = 0;
+              //get motor id
+              i = rx_header_can1.StdId - CAN_3508_M1_ID;
+              get_motor_measure(&motor_chassis[i], rx_data_can1);
+              break;
+          }
+          default:
+          {
+              break;
+          }
+      }
+    }
+    
+    ////////CAN2接收数据处理//////////
+    if (hcan->Instance == CAN2)
     {
-        case CAN_3508_M1_ID:
-        case CAN_3508_M2_ID:
-        case CAN_3508_M3_ID:
-        case CAN_3508_M4_ID:
-        case CAN_YAW_MOTOR_ID:
-        case CAN_PIT_MOTOR_ID:
-        case CAN_TRIGGER_MOTOR_ID:
+        HAL_CAN_GetRxMessage(&hcan2, CAN_RX_FIFO0, &rx_header_can2, rx_data_can2); // 从FIFO中接收消息至rx_header_can2
+        switch (rx_header_can2.StdId)
         {
-            static uint8_t i = 0;
-            //get motor id
-            i = rx_header.StdId - CAN_3508_M1_ID;
-            get_motor_measure(&motor_chassis[i], rx_data);
+
+        case DM4340_M1:
+        {
+
+            DM4340_Date[0].id = (rx_data_can2[0]) & 0x0F;                               // 电机ID
+            MD_CanReceive(&DM4340_Date[0], rx_data_can2);                 // 反馈帧解包
+
+            DM4340_Date[0].esc_back_position_last = DM4340_Date[0].esc_back_position;   // 上一次返回的位置 = 现在位置
+
+            motor_feedback_states[0].feedback_received = true;          // 接收到电机反馈，成功使能
+
+            FPS.DM4340_M1++;
             break;
         }
-        case 0x00: // 达妙电机反馈帧即master id
+        case DM4340_M2:
         {
-            static motor_t dm_motor;
-            dm_motor_fbdata(&dm_motor, rx_data);
-            
-            // 更新电机反馈状态
-            uint8_t motor_id = dm_motor.para.id;
-            if (motor_id >= 1 && motor_id <= 3) {
-                uint8_t index = motor_id - 1;
-                motor_feedback_states[index].feedback_received = true;
-                motor_feedback_states[index].last_pos = dm_motor.para.pos;
-                motor_feedback_states[index].last_vel = dm_motor.para.vel;
-            }
+            DM4340_Date[1].id = (rx_data_can2[0]) & 0x0F;
+            MD_CanReceive(&DM4340_Date[1], rx_data_can2);
+
+            DM4340_Date[1].esc_back_position_last = DM4340_Date[1].esc_back_position;
+
+            motor_feedback_states[1].feedback_received = true;
+
+            FPS.DM4340_M2++;
             break;
         }
+        case DM4340_M3:
+        {
+            DM4340_Date[2].id = (rx_data_can2[0]) & 0x0F;
+            MD_CanReceive(&DM4340_Date[2], rx_data_can2);
+
+            DM4340_Date[2].esc_back_position_last = DM4340_Date[2].esc_back_position;
+
+            motor_feedback_states[2].feedback_received = true;
+
+            FPS.DM4340_M3++;
+            break;
+        }
+
         default:
         {
             break;
         }
+        }
     }
 }
 
-/* 达妙电机反馈数据解析 */
-void dm_motor_fbdata(motor_t *motor, uint8_t *rx_data)
-{
-    motor->para.id = (rx_data[0])&0x0F;
-    motor->para.state = (rx_data[0])>>4;
-    motor->para.p_int=(rx_data[1]<<8)|rx_data[2];
-    motor->para.v_int=(rx_data[3]<<4)|(rx_data[4]>>4);
-    motor->para.t_int=((rx_data[4]&0xF)<<8)|rx_data[5];
-    motor->para.pos = uint_to_float(motor->para.p_int, -motor->tmp.PMAX, motor->tmp.PMAX, 16); // (-12.5,12.5)
-    motor->para.vel = uint_to_float(motor->para.v_int, -motor->tmp.VMAX, motor->tmp.VMAX, 12); // (-45.0,45.0)
-    motor->para.tor = uint_to_float(motor->para.t_int, -motor->tmp.TMAX, motor->tmp.TMAX, 12); // (-18.0,18.0)
-    motor->para.Tmos = (float)(rx_data[6]);
-    motor->para.Tcoil = (float)(rx_data[7]);
-}
+
 
 
 
@@ -339,130 +401,146 @@ const motor_measure_t *get_chassis_motor_measure_point(uint8_t i)
 
 // 达妙电机控制函数
 
-/**
-  * @brief          control motor position and velocity in position-velocity mode
-  * @param[in]      can_id: motor CAN ID
-  * @param[in]      pos: target position (float, little-endian)
-  * @param[in]      vel: target velocity (float, little-endian)
-  * @retval         none
-  */
-/**
-  * @brief          位置速度模式控制电机
-  * @param[in]      can_id: 电机CAN ID
-  * @param[in]      pos: 目标位置(浮点数，小端序)
-  * @param[in]      vel: 目标速度(浮点数，小端序)
-  * @retval         none
-  */
-void CAN_cmd_motor_pos_vel_control(float pos, float vel)
+
+/// @brief 使用pid输出力矩的方式控制，即电流环控制
+/// @param hcan can输出句柄
+/// @param id HT电机的id号
+/// @param _torq 输入的前馈力矩
+void MD4340_motor_PID_Control(uint32_t id, float torq)
 {
-    // 位置和速度变化阈值(避免因浮点精度问题频繁重发)
-    const float POS_THRESHOLD = 0.001f;
-    const float VEL_THRESHOLD = 0.001f;
+    uint8_t TxData[8];
+    static CAN_TxHeaderTypeDef CAN_DMmsg_TxHeader;
+    uint16_t t = float_to_uint(torq, DM4340_T_MIN, DM4340_T_MAX, 12);
     
-    for (uint8_t i = 0; i < 3; i++) {
-        // 检查是否需要发送(位置/速度变化或未收到反馈)
-        bool need_send = !motor_feedback_states[i].feedback_received || 
-                        (fabsf(pos - motor_feedback_states[i].last_pos) > POS_THRESHOLD) ||
-                        (fabsf(vel - motor_feedback_states[i].last_vel) > VEL_THRESHOLD);
-        
-        // 检查发送间隔(最小100ms)
-        bool time_ok = (HAL_GetTick() - motor_feedback_states[i].last_send_time) >= 100;
-        
-        if (need_send && time_ok) {
-            uint8_t *pos_ptr = (uint8_t*)&pos;
-            uint8_t *vel_ptr = (uint8_t*)&vel;
+    CAN_DMmsg_TxHeader.StdId = id;
+    CAN_DMmsg_TxHeader.IDE = CAN_ID_STD;
+    CAN_DMmsg_TxHeader.RTR = CAN_RTR_DATA;
+    CAN_DMmsg_TxHeader.DLC = 0x08;
+    
+    TxData[0] = 0;  // position high byte
+    TxData[1] = 0;  // position low byte
+    TxData[2] = 0;  // velocity high nibble
+    TxData[3] = 0;  // velocity low nibble + kp high byte
+    TxData[4] = 0;  // kp low byte
+    TxData[5] = 0;  // kd high nibble
+    TxData[6] = t >> 8;  // torque high byte
+    TxData[7] = t & 0xFF; // torque low byte
+    
+    HAL_CAN_AddTxMessage(&GIMBAL_CAN, &CAN_DMmsg_TxHeader, TxData, (uint32_t *)CAN_TX_MAILBOX0);
+}
 
-            // 设置CAN消息头(固定值)
-            gimbal_tx_message.IDE = CAN_ID_STD;
-            gimbal_tx_message.RTR = CAN_RTR_DATA;
-            gimbal_tx_message.DLC = 0x08;
-            gimbal_tx_message.StdId = 0x101 + i; // CAN ID从0x101到0x103
-            
-            // 填充位置数据(小端序)
-            gimbal_can_send_data[0] = pos_ptr[0];
-            gimbal_can_send_data[1] = pos_ptr[1];
-            gimbal_can_send_data[2] = pos_ptr[2];
-            gimbal_can_send_data[3] = pos_ptr[3];
-            
-            // 填充速度数据(小端序)
-            gimbal_can_send_data[4] = vel_ptr[0];
-            gimbal_can_send_data[5] = vel_ptr[1];
-            gimbal_can_send_data[6] = vel_ptr[2];
-            gimbal_can_send_data[7] = vel_ptr[3];
-            
-            // 检查三个邮箱状态，选择空闲邮箱发送
-            HAL_StatusTypeDef send_status = HAL_ERROR;
-            uint32_t mailbox;
 
-            // 尝试三个邮箱
-            for (mailbox = CAN_TX_MAILBOX0; mailbox <= CAN_TX_MAILBOX2; mailbox++) {
-                if (HAL_CAN_IsTxMessagePending(&GIMBAL_CAN, mailbox) == HAL_OK) {
-                    send_status = HAL_CAN_AddTxMessage(&GIMBAL_CAN, &gimbal_tx_message,
-                                                     gimbal_can_send_data, &mailbox);
-                    if (send_status == HAL_OK) {
-                        break; // 发送成功则退出循环
-                    }
-                }
-            }
-            
-
-            
-            // 发送成功后更新状态
-            if (send_status == HAL_OK) {
-                motor_feedback_states[i].last_send_time = HAL_GetTick();
-                motor_feedback_states[i].feedback_received = false;
-                motor_feedback_states[i].last_pos = pos;
-                motor_feedback_states[i].last_vel = vel;
-            }
-        }
+/**
+  * @brief          DM motor data receive
+  * @param[in]      motor: motor data structure
+  * @param[in]      RxDate: received CAN data
+  * @retval         none
+  */
+/**
+  * @brief          DM电机数据解包
+  * @param[in]      motor: 电机数据结构体
+  * @param[in]      RxData: 接收的CAN数据
+  * @retval         none
+  */
+void MD_CanReceive(s_motor_data_t *motor, uint8_t RxData[8])
+{
+    int p_int = (RxData[1] << 8) | RxData[2];
+    int v_int = (RxData[3] << 4) | (RxData[4] >> 4);
+    int i_int = ((RxData[4] & 0xf) << 8) | (RxData[5]);
+    int T_int = RxData[6];
+    if (motor->id == 0x01)
+    {
+        motor->state = (RxData[0]) >> 4;
+        motor->esc_back_position = uint_to_float(p_int, DM4340_P_MIN, DM4340_P_MAX, 16); // 电机位置
+        motor->esc_back_speed = uint_to_float(v_int, DM4340_V_MIN, DM4340_V_MAX, 12);    // 电机速度
+        motor->esc_back_current = uint_to_float(i_int, DM4340_T_MIN, DM4340_T_MAX, 12);  //	电机扭矩/电流
+        motor->Tmos = (float)(RxData[6]);
+        motor->Tcoil = (float)(RxData[7]);
     }
+    if (motor->id == 0x02)
+    {
+        motor->state = (RxData[0]) >> 4;
+        motor->esc_back_position = uint_to_float(p_int, DM4340_P_MIN, DM4340_P_MAX, 16); // 电机位置
+        motor->esc_back_speed = uint_to_float(v_int, DM4340_V_MIN, DM4340_V_MAX, 12);    // 电机速度
+        motor->esc_back_current = uint_to_float(i_int, DM4340_T_MIN, DM4340_T_MAX, 12);  //	电机扭矩/电流
+        motor->Tmos = (float)(RxData[6]);
+        motor->Tcoil = (float)(RxData[7]);
+    }
+    if (motor->id == 0x03)
+    {
+        motor->state = (RxData[0]) >> 4;
+        motor->esc_back_position = uint_to_float(p_int, DM4340_P_MIN, DM4340_P_MAX, 16); // 电机位置
+        motor->esc_back_speed = uint_to_float(v_int, DM4340_V_MIN, DM4340_V_MAX, 12);    // 电机速度
+        motor->esc_back_current = uint_to_float(i_int, DM4340_T_MIN, DM4340_T_MAX, 12);  //	电机扭矩/电流
+        motor->Tmos = (float)(RxData[6]);
+        motor->Tcoil = (float)(RxData[7]);
+    }
+//    motor->id = (RxData[0])&0x0F;
+//    motor->state = (RxData[0])>>4;
+//    motor->p_int = (RxData[1]<<8)|RxData[2];
+//    motor->v_int = (RxData[3]<<4)|(RxData[4]>>4);
+//    motor->t_int = ((RxData[4]&0xF)<<8)|RxData[5];
+//
+//    // 位置解包 (-12.5,12.5)
+//    motor->esc_back_position = uint_to_float(motor->p_int, DM4340_P_MIN, DM4340_P_MAX, 16);
+//
+//    // 速度解包 (-45.0,45.0)
+//    motor->esc_back_speed = uint_to_float(motor->v_int, DM4340_V_MIN, DM4340_V_MAX, 12);
+//
+//    // 转矩解包 (-18.0,18.0)
+//    motor->esc_back_current = uint_to_float(motor->t_int, DM4340_T_MIN, DM4340_T_MAX, 12);
+//
+//    // 温度解包
+//    motor->Tmos = (float)(RxData[6]);
+//    motor->Tcoil = (float)(RxData[7]);
+//
+//    // 计算总角度
+//    if(motor->esc_back_position_last - motor->esc_back_position > 4096)
+//        motor->circle_num++;
+//    else if(motor->esc_back_position - motor->esc_back_position_last > 4096)
+//        motor->circle_num--;
+//
+//    motor->serial_position = motor->circle_num * 8192 + motor->esc_back_position;
+//    motor->serial_angle = motor->serial_position / 8192 * 2 * PI;
+//    motor->esc_back_position_last = motor->esc_back_position;
+//    motor->p_int = (RxData[0] << 8) | RxData[1];
+//    motor->v_int = (RxData[2] << 4) | (RxData[3] >> 4);
+//    motor->t_int = ((RxData[3] & 0x0F) << 8) | RxData[4];
+//
+//    motor->esc_back_position = uint_to_float(motor->p_int, DM4340_P_MIN, DM4340_P_MAX, 16);
+//    motor->esc_back_speed = uint_to_float(motor->v_int, DM4340_V_MIN, DM4340_V_MAX, 12);
+//    motor->esc_back_current = uint_to_float(motor->t_int, DM4340_T_MIN, DM4340_T_MAX, 12);
+//
+//    motor->Tmos = (float)RxData[6];
+//    motor->state = RxData[0] >> 4;
 }
 
 
 
-/**
-  * @brief          enable motor with specified CAN ID and mode offset
-  * @param[in]      can_id: motor CAN ID
-  * @param[in]      mode_offset: mode offset ID (0x00, 0x100, 0x200, 0x300)
-  * @retval         none
-  */
-/**
-  * @brief          使能指定CAN ID和模式偏移的电机
-  * @param[in]      can_id: 电机CAN ID
-  * @param[in]      mode_offset: 模式偏移ID (0x00, 0x100, 0x200, 0x300)
-  * @retval         none
-  */
-/**
-  * @brief          control motor enable/disable with specified CAN ID and mode offset
-  * @param[in]      can_id: motor CAN ID
-  * @param[in]      mode_offset: mode offset ID (0x00, 0x100, 0x200, 0x300)
-  * @param[in]      enable: True to enable, False to disable
-  * @retval         none
-  */
-/**
-  * @brief          控制电机使能/失能
-  * @param[in]      can_id: 电机CAN ID
-  * @param[in]      mode_offset: 模式偏移ID (0x00, 0x100, 0x200, 0x300)
-  * @param[in]      enable: True为使能，False为失能
-  * @retval         none
-  */
+/// @brief DM电机启动函数
+/// @param Target_hcan CAN输出句柄
+/// @param id DM电机的id号
 void CAN_cmd_motor_control(uint16_t can_id, uint16_t mode_offset, bool enable)
 {
     uint32_t send_mail_box;
     uint8_t motor_index = can_id - 1; // 电机ID转换为数组索引(1->0, 2->1, 3->2)
-    
+
     if (enable) {
         // 检查电机是否已经使能并收到反馈
-        if (motor_feedback_states[motor_index].enabled && 
+        if (motor_feedback_states[motor_index].enabled &&
             motor_feedback_states[motor_index].feedback_received) {
+
+            if (DM4340_Date[motor_index].real_angle == 0.0){ //检测是否为特定值
+                DM4340_Date[motor_index].real_angle = DM4340_Date[motor_index].esc_back_position;
+            }
             return; // 已经使能并收到反馈，不再发送
         }
-        
+
         // 检查上次发送时间，避免频繁发送
         if (HAL_GetTick() - motor_feedback_states[motor_index].last_send_time < 100) {
             return; // 发送间隔太短，跳过
         }
-        
+
         // 更新状态
         motor_feedback_states[motor_index].enabled = true;
         motor_feedback_states[motor_index].feedback_received = false;
@@ -477,13 +555,84 @@ void CAN_cmd_motor_control(uint16_t can_id, uint16_t mode_offset, bool enable)
     gimbal_tx_message.IDE = CAN_ID_STD;
     gimbal_tx_message.RTR = CAN_RTR_DATA;
     gimbal_tx_message.DLC = 0x08;
-    
+
     /* 填充前7字节为0xFF */
     memset(gimbal_can_send_data, 0xFF, 7);
     /* 根据enable参数设置第8字节 */
     gimbal_can_send_data[7] = enable ? 0xFC : 0xFD;
-    
+
     HAL_CAN_AddTxMessage(&GIMBAL_CAN, &gimbal_tx_message, gimbal_can_send_data, &send_mail_box);
 }
 
 
+
+
+/* 封装的DM4340控制接口实现 */
+
+// PID参数定义
+#define DM4340_ANGLE_KP 1.4f
+#define DM4340_ANGLE_KI 0.0f
+#define DM4340_ANGLE_KD 4.0f
+#define DM4340_ANGLE_OUT_MAX 25.0f
+
+#define DM4340_SPEED_KP 0.4f
+#define DM4340_SPEED_KI 0.0f
+#define DM4340_SPEED_KD 0.0f
+#define DM4340_SPEED_OUT_MAX 0.2f
+
+/**
+  * @brief  DM4340控制初始化
+  * @param  motor_id: 电机ID (0-2)
+  */
+void DM4340_Control_Init(uint8_t motor_id)
+{
+    if(motor_id > 2) return;
+    
+    // 初始化角度环PID参数
+    DM4340_Date[motor_id].f_kp = DM4340_ANGLE_KP;
+    DM4340_Date[motor_id].f_p = 0;
+    DM4340_Date[motor_id].f_kd = DM4340_ANGLE_KD;
+    
+    // 初始化速度环PID参数
+    DM4340_Date[motor_id].f_v = 0;
+    DM4340_Date[motor_id].Kp = DM4340_SPEED_KP;
+    DM4340_Date[motor_id].Kd = DM4340_SPEED_KD;
+}
+
+/**
+  * @brief  设置DM4340目标角度
+  * @param  motor_id: 电机ID (0-2)
+  * @param  angle: 目标角度(弧度)
+  */
+void DM4340_Set_Target_Angle(uint8_t motor_id, float angle)
+{
+    if(motor_id > 2) return;
+    
+    DM4340_Date[motor_id].target_angle = angle;
+}
+
+/**
+  * @brief  DM4340控制循环
+  * @param  motor_id: 电机ID (0-2)
+  */
+void DM4340_Control_Loop(uint8_t motor_id)
+{
+    if(motor_id > 2) return;
+    
+    s_motor_data_t *motor = &DM4340_Date[motor_id];
+
+    // 1. 角度环计算
+    float angle_error = motor->target_angle - motor->esc_back_position;
+    motor->f_p = angle_error;
+    float speed_set = motor->f_kp * motor->f_p + motor->f_kd * (motor->f_p - motor->esc_back_angle);
+    speed_set = constrain(speed_set, -DM4340_ANGLE_OUT_MAX, DM4340_ANGLE_OUT_MAX);
+    
+    // 2. 速度环计算
+    float speed_error = speed_set - motor->esc_back_speed;
+    float current_set = motor->Kp * speed_error;
+    current_set = constrain(current_set, -DM4340_SPEED_OUT_MAX, DM4340_SPEED_OUT_MAX);
+    
+    // 3. 输出电流
+    motor->out_current = current_set;
+    MD4340_motor_PID_Control(motor->id, motor->out_current);
+}
