@@ -304,37 +304,7 @@ void CAN_cmd_chassis(int16_t motor1, int16_t motor2, int16_t motor3, int16_t mot
     HAL_CAN_AddTxMessage(&CHASSIS_CAN, &chassis_tx_message, chassis_can_send_data, &send_mail_box);
 }
 
-void CAN_cmd_chassis1(int16_t motor1, int16_t motor2)
-{
-    uint32_t send_mail_box;
-    chassis_tx_message.StdId = CAN_CHASSIS_ALL_ID;
-    chassis_tx_message.IDE = CAN_ID_STD;
-    chassis_tx_message.RTR = CAN_RTR_DATA;
-    chassis_tx_message.DLC = 0x08;
-    chassis_can_send_data[0] = motor1 >> 8;
-    chassis_can_send_data[1] = motor1;
 
-    chassis_can_send_data[2] = motor2 >> 8;
-    chassis_can_send_data[3] = motor2;
-
-    HAL_CAN_AddTxMessage(&CHASSIS_CAN, &chassis_tx_message, chassis_can_send_data, &send_mail_box);
-}
-void CAN_cmd_chassis2(int16_t motor3, int16_t motor4)
-{
-    uint32_t send_mail_box;
-    chassis_tx_message.StdId = CAN_CHASSIS_ALL_ID;
-    chassis_tx_message.IDE = CAN_ID_STD;
-    chassis_tx_message.RTR = CAN_RTR_DATA;
-    chassis_tx_message.DLC = 0x08;
-
-    chassis_can_send_data[4] = motor3 >> 8;
-    chassis_can_send_data[5] = motor3;
-
-    chassis_can_send_data[6] = motor4 >> 8;
-    chassis_can_send_data[7] = motor4;
-    //can2
-    HAL_CAN_AddTxMessage(&GIMBAL_CAN, &chassis_tx_message, chassis_can_send_data, &send_mail_box);
-}
 /**
   * @brief          return the yaw 6020 motor data point
   * @param[in]      none
@@ -517,9 +487,10 @@ void MD_CanReceive(s_motor_data_t *motor, uint8_t RxData[8])
 
 
 
-/// @brief DM电机启动函数
-/// @param Target_hcan CAN输出句柄
-/// @param id DM电机的id号
+/// @brief DM电机使能函数
+/// @param can_id CAN ID
+/// @param mode_offset 地址偏移量
+/// @param enable 使能/失能
 void CAN_cmd_motor_control(uint16_t can_id, uint16_t mode_offset, bool enable)
 {
     uint32_t send_mail_box;
@@ -530,7 +501,8 @@ void CAN_cmd_motor_control(uint16_t can_id, uint16_t mode_offset, bool enable)
         if (motor_feedback_states[motor_index].enabled &&
             motor_feedback_states[motor_index].feedback_received) {
 
-            if (DM4340_Date[motor_index].real_angle == 0.0){ //检测是否为特定值
+            if (DM4340_Date[motor_index].real_angle == 0.0){    //检测是否为特定值
+                CAN_cmd_motor_set_zero(can_id);                 //第一次启动设为零点
                 DM4340_Date[motor_index].real_angle = DM4340_Date[motor_index].esc_back_position;
             }
             return; // 已经使能并收到反馈，不再发送
@@ -566,6 +538,24 @@ void CAN_cmd_motor_control(uint16_t can_id, uint16_t mode_offset, bool enable)
 
 
 
+void CAN_cmd_motor_set_zero(uint16_t can_id)
+{
+    uint32_t send_mail_box;
+    gimbal_tx_message.StdId = can_id;
+    gimbal_tx_message.IDE = CAN_ID_STD;
+    gimbal_tx_message.RTR = CAN_RTR_DATA;
+    gimbal_tx_message.DLC = 0x08;
+
+    /* 填充前7字节为0xFF */
+    memset(gimbal_can_send_data, 0xFF, 7);
+    /* 根据enable参数设置第8字节 */
+    gimbal_can_send_data[7] =0xFE;
+    HAL_CAN_AddTxMessage(&GIMBAL_CAN, &gimbal_tx_message, gimbal_can_send_data, &send_mail_box);
+}
+
+
+
+
 
 /* 封装的DM4340控制接口实现 */
 
@@ -578,7 +568,7 @@ void CAN_cmd_motor_control(uint16_t can_id, uint16_t mode_offset, bool enable)
 #define DM4340_SPEED_KP 0.4f
 #define DM4340_SPEED_KI 0.0f
 #define DM4340_SPEED_KD 0.0f
-#define DM4340_SPEED_OUT_MAX 0.2f
+#define DM4340_SPEED_OUT_MAX 0.3f
 
 /**
   * @brief  DM4340控制初始化

@@ -234,7 +234,7 @@ typedef struct
   * @retval         none
   */
 extern void CAN_cmd_motor_control(uint16_t can_id, uint16_t mode_offset, bool enable);
-
+extern void CAN_cmd_motor_set_zero(uint16_t can_id);
 /**
   * @brief          control motor position and velocity in position-velocity mode
   * @param[in]      can_id: motor CAN ID
