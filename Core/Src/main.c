@@ -539,8 +539,9 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
             
             if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_12) == GPIO_PIN_SET) {
                 // 上升沿触发
-
-
+                DM4340_Set_Target_Angle(0, 0);
+                DM4340_Set_Target_Angle(1, 0);
+                DM4340_Set_Target_Angle(2, 0);
 
                 snprintf(temp_buffer, sizeof(temp_buffer), 
                         "[INT] PB12 Rising Edge at %lums\r\n", current_time);
@@ -548,7 +549,9 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
                 // 下降沿触发
 
                 // 设置目标角度(弧度)
-                DM4340_Set_Target_Angle(0, PI/4);
+                DM4340_Set_Target_Angle(0, 1.5);
+                DM4340_Set_Target_Angle(1, 1.5);
+                DM4340_Set_Target_Angle(2, 1.5);
 
                 snprintf(temp_buffer, sizeof(temp_buffer), 
                         "[INT] PB12 Falling Edge at %lums\r\n", current_time);
