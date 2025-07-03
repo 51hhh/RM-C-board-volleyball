@@ -568,7 +568,7 @@ void CAN_cmd_motor_set_zero(uint16_t can_id)
 #define DM4340_SPEED_KP 0.4f
 #define DM4340_SPEED_KI 0.0f
 #define DM4340_SPEED_KD 0.0f
-#define DM4340_SPEED_OUT_MAX 1.0f
+#define DM4340_SPEED_OUT_MAX 15.0f
 
 /**
   * @brief  DM4340控制初始化

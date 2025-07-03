@@ -25,6 +25,12 @@
 #include "usart.h"
 #include "gpio.h"
 
+#define UART1_RX_BUFFER_SIZE 128
+uint8_t uart1_rx_buffer[UART1_RX_BUFFER_SIZE];
+uint8_t uart1_rx_byte; // 单字节接收缓冲区
+uint8_t uart1_line_buffer[128]; // 行缓冲区
+uint16_t uart1_line_pos = 0; // 行缓冲区当前位置
+
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 // 自定义头文件
@@ -36,6 +42,9 @@
 #include "../application/CAN_receive.h"
 #include "../application/remote_control.h"
 #include "../application/BMI088driver.h"
+
+// 位置环PID控制器
+motor_pid_t pos_x_pid, pos_y_pid;
 
 
 /* USER CODE END Includes */
@@ -111,6 +120,8 @@ fp32 gyro[3], accel[3], temp;
 
 // 全局变量
 float accel_x, accel_y, accel_z; // 加速度计测量值
+int32_t uart_x = 0;  // 从串口接收的X坐标
+int32_t uart_y = 0;  // 从串口接收的Y坐标
 float accel_x_true, accel_y_true, accel_z_true; // 真实加速度
 float accel_x_bias = 0.0f, accel_y_bias = 0.0f, accel_z_bias = 0.0f; // 加速度计零偏
 uint32_t previous_time_stamp = 0; // 上一次的时间戳
@@ -219,6 +230,9 @@ int main(void)
   MX_DMA_Init();
   MX_CAN1_Init();
   MX_USART1_UART_Init();
+  // 启动USART1单字节接收模式
+  HAL_UART_Receive_IT(&huart1, &uart1_rx_byte, 1);
+  
   MX_USART3_UART_Init();
   MX_CAN2_Init();
   MX_SPI1_Init();
@@ -249,6 +263,10 @@ int main(void)
 
     // Wz 正对方向pid控制
     pid_init(&wz_pid, 1.5, 0.00, 0.0, 500, 660);
+
+    // 位置环PID初始化
+    pid_init(&pos_x_pid, 0.6f, 0.01f, 0.2f, 1000, 300); // X方向位置环
+    pid_init(&pos_y_pid, 0.6f, 0.01f, 0.2f, 1000, 300); // Y方向位置环
 
 
 
@@ -355,20 +373,41 @@ int main(void)
 
           }
       }
-      // 状态二底盘Wz维持
-      if (type == 2){
-          // 定义底盘速度变量
-          float Vx = 0.0f;
-          float Vy = 0.0f;
-          float Wz = 0.0f;
+    //   // 状态二底盘Wz维持
+    //   if (type == 2){
+    //       // 定义底盘速度变量
+    //       float Vx = 0.0f;
+    //       float Vy = 0.0f;
+    //       float Wz = 0.0f;
 
 
-          // Wz 控制
-          float dt = current_time_stamp - previous_time_stamp;
-          current_angle += (gyro[2] * dt) - (dt * current_angle_err);            // 积分得到当前角度 (gyro[2] 是 Z 轴角速度)
+    //       // Wz 控制
+    //       float dt = current_time_stamp - previous_time_stamp;
+    //       current_angle += (gyro[2] * dt) - (dt * current_angle_err);            // 积分得到当前角度 (gyro[2] 是 Z 轴角速度)
 
-          float wz_compensation = pid_calc(&wz_pid, target_wz, current_angle);// 计算 PID 控制器输出，用于补偿 Wz
-          Wz = wz_compensation;
+    //       float wz_compensation = pid_calc(&wz_pid, target_wz, current_angle);// 计算 PID 控制器输出，用于补偿 Wz
+    //       Wz = wz_compensation;
+
+    //       // 根据底盘速度计算麦克纳姆轮速度
+    //       target_speed1 = -(Vx + Vy + Wz)*1000; // 右前方轮
+    //       target_speed2 = (Vx - Vy - Wz)*1000; // 左前方轮
+    //       target_speed3 = -(Vx + Vy - Wz)*1000; // 右后方轮
+    //       target_speed4 = (Vx - Vy + Wz)*1000; // 左后方轮
+
+    //   }
+      if(type == 2){
+           // 使用从串口接收的坐标控制底盘
+           float Vx = (uart_x / 1000.0f);  // 前后
+           float Vy = 0.0f;
+           float Wz = -(uart_y / 1000.0f);  // 左右
+
+
+
+//          // 位置环PID计算目标速度
+//          float Vx = -(pid_calc(&pos_x_pid, 0, uart_y)/1000.0f);  // X方向位置控制
+//          float Vy = 0.0f; // Wz方向位置控制
+//          float Wz = (pid_calc(&pos_y_pid, 0, uart_x)/1000.0f);  // 左右
+//
 
           // 根据底盘速度计算麦克纳姆轮速度
           target_speed1 = -(Vx + Vy + Wz)*1000; // 右前方轮
@@ -524,6 +563,36 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
     }
 }
 
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+    if(huart->Instance == USART1) {
+        // 检查是否收到换行符
+        if(uart1_rx_byte == '\n') {
+            // 完成一行接收，添加字符串结束符
+            uart1_line_buffer[uart1_line_pos] = '\0';
+            
+            // 尝试解析"int,int"格式的坐标
+            if(sscanf((char*)uart1_line_buffer, "%d,%d", &uart_y, &uart_x) == 2) {
+                char temp_buffer[64];
+                snprintf(temp_buffer, sizeof(temp_buffer), "Parsed coordinates: X=%d, Y=%d\r\n", 
+                        uart_y, uart_x);
+                uart_queue_send(temp_buffer, strlen(temp_buffer));
+            }
+            
+            // 重置行缓冲区
+            uart1_line_pos = 0;
+        } else {
+            // 存储接收到的字节
+            if(uart1_line_pos < sizeof(uart1_line_buffer)-1) {
+                uart1_line_buffer[uart1_line_pos++] = uart1_rx_byte;
+            }
+        }
+        
+        // 重新启动单字节接收
+        HAL_UART_Receive_IT(&huart1, &uart1_rx_byte, 1);
+    }
+}
+
 /* PB12中断回调函数 */
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
@@ -549,9 +618,9 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
                 // 下降沿触发
 
                 // 设置目标角度(弧度)
-                DM4340_Set_Target_Angle(0, 1.5);
-                DM4340_Set_Target_Angle(1, 1.5);
-                DM4340_Set_Target_Angle(2, 1.5);
+                DM4340_Set_Target_Angle(0, 1.0);
+                DM4340_Set_Target_Angle(1, 1.0);
+                DM4340_Set_Target_Angle(2, 1.0);
 
                 snprintf(temp_buffer, sizeof(temp_buffer), 
                         "[INT] PB12 Falling Edge at %lums\r\n", current_time);

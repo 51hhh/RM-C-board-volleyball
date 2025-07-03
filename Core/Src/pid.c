@@ -23,8 +23,8 @@ void pid_init(motor_pid_t *pid,
 // PID 计算函数
 float pid_calc(motor_pid_t *pid, float ref, float fdb)
 {
-    pid->ref = ref;
-    pid->fdb = fdb;
+    pid->ref = ref;         
+    pid->fdb = fdb;          
 
     // 计算误差
     pid->err[1] = pid->err[0];
