@@ -71,7 +71,8 @@ uint16_t uart_queue_tail = 0;
 uint8_t dma_tx_complete = 1;  // DMA 传输完成标志位
 int16_t led_cnt;  // LED计数器
 extern motor_measure_t motor_chassis; // 外部定义的电机信息结构体
-
+uint8_t g_rising_edge_triggered = 0; // 下降沿触发标志位
+uint32_t g_trigger_timestamp = 0; // 下降沿触发时间戳
 
 // uart 消息发送添加队列函数
 void uart_queue_send(const char* data, uint16_t length) {
@@ -396,24 +397,57 @@ int main(void)
 
     //   }
       if(type == 2){
-           // 使用从串口接收的坐标控制底盘
-           float Vx = (uart_x / 1000.0f);  // 前后
-           float Vy = 0.0f;
-           float Wz = -(uart_y / 1000.0f);  // 左右
+
+          // 获取摇杆数据
+          float z = -((float) rc_ctrl_point->rc.ch[0]); // 左右摇杆，右为正
+          float y = (float) rc_ctrl_point->rc.ch[1]; // 上下摇杆，上为正
+          float x = -((float) rc_ctrl_point->rc.ch[2]); // 旋转
+          float w = (float) rc_ctrl_point->rc.ch[3];  // 速度
+
+          // 映射摇杆数据到 -1 到 1 的范围
+          float x_normalized = x / 660.0f;
+          float y_normalized = y / 660.0f;
+          float z_normalized = z / 660.0f;
+          float w_normalized = w / 660.0f;
+
+
+          // 添加死区
+          float deadzone = 0.05f;
+          if (fabs(x_normalized) < deadzone) {
+              x_normalized = 0.0f;
+          }
+          if (fabs(y_normalized) < deadzone) {
+              y_normalized = 0.0f;
+          }
+          if (fabs(z_normalized) < deadzone) {
+              z_normalized = 0.0f;
+          }
+          if (fabs(w_normalized) < deadzone) {
+              w_normalized = 0.0f;
+          }
 
 
 
-//          // 位置环PID计算目标速度
-//          float Vx = -(pid_calc(&pos_x_pid, 0, uart_y)/1000.0f);  // X方向位置控制
-//          float Vy = 0.0f; // Wz方向位置控制
-//          float Wz = (pid_calc(&pos_y_pid, 0, uart_x)/1000.0f);  // 左右
-//
+          // 陀螺仪
+          // Wz 控制
+          float dt = current_time_stamp - previous_time_stamp;
+          current_angle += (gyro[2] * dt) - (dt * current_angle_err);            // 积分得到当前角度 (gyro[2] 是 Z 轴角速度)
+
+          float wz_compensation = pid_calc(&wz_pid, target_wz, current_angle);// 计算 PID 控制器输出，用于补偿 Wz
+
+
+          // 使用从串口接收的坐标控制底盘
+           float Vx = -(uart_x / 100.0f) + y_normalized*5;  // 前后
+           float Vy = x_normalized*5 + wz_compensation;     // Wz旋转
+           float Wz = -(uart_y / 100.0f) + z_normalized*5;  // 左右
+
+
 
           // 根据底盘速度计算麦克纳姆轮速度
-          target_speed1 = -(Vx + Vy + Wz)*1000; // 右前方轮
-          target_speed2 = (Vx - Vy - Wz)*1000; // 左前方轮
-          target_speed3 = -(Vx + Vy - Wz)*1000; // 右后方轮
-          target_speed4 = (Vx - Vy + Wz)*1000; // 左后方轮
+          target_speed1 = -(Vx + Vy + Wz)*1000*(w_normalized+1); // 右前方轮
+          target_speed2 = (Vx - Vy - Wz)*1000*(w_normalized+1); // 左前方轮
+          target_speed3 = -(Vx + Vy - Wz)*1000*(w_normalized+1); // 右后方轮
+          target_speed4 = (Vx - Vy + Wz)*1000*(w_normalized+1); // 左后方轮
 
       }
       if (type == 3){
@@ -468,6 +502,19 @@ int main(void)
               motor->esc_back_position, motor->f_p, motor->esc_back_speed, motor->out_current);
       uart_queue_send(uart_buffer,strlen(uart_buffer));
 
+
+
+
+    // 处理上升沿触发的延时任务
+    if (g_rising_edge_triggered && (HAL_GetTick() - g_trigger_timestamp >= 500))
+    {
+        // 设置目标角度(弧度)
+        DM4340_Set_Target_Angle(0, 0.1);
+        DM4340_Set_Target_Angle(1, 0.1);
+        DM4340_Set_Target_Angle(2, 0.1);
+        g_rising_edge_triggered = 0; // 重置标志位
+    }
+    
 
       led_cnt ++;// LED计数器自增
       if (led_cnt == 2)
@@ -608,9 +655,9 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
             
             if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_12) == GPIO_PIN_SET) {
                 // 上升沿触发
-                DM4340_Set_Target_Angle(0, 0);
-                DM4340_Set_Target_Angle(1, 0);
-                DM4340_Set_Target_Angle(2, 0);
+                // DM4340_Set_Target_Angle(0, 0);
+                // DM4340_Set_Target_Angle(1, 0);
+                // DM4340_Set_Target_Angle(2, 0);
 
                 snprintf(temp_buffer, sizeof(temp_buffer), 
                         "[INT] PB12 Rising Edge at %lums\r\n", current_time);
@@ -618,9 +665,13 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
                 // 下降沿触发
 
                 // 设置目标角度(弧度)
-                DM4340_Set_Target_Angle(0, 1.0);
-                DM4340_Set_Target_Angle(1, 1.0);
-                DM4340_Set_Target_Angle(2, 1.0);
+                DM4340_Set_Target_Angle(0, 1.1);
+                DM4340_Set_Target_Angle(1, 1.1);
+                DM4340_Set_Target_Angle(2, 1.1);
+
+                g_rising_edge_triggered = 1; // 设置下降沿触发标志位
+                g_trigger_timestamp = current_time; // 记录触发时间
+
 
                 snprintf(temp_buffer, sizeof(temp_buffer), 
                         "[INT] PB12 Falling Edge at %lums\r\n", current_time);

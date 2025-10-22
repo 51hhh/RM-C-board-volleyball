@@ -560,15 +560,16 @@ void CAN_cmd_motor_set_zero(uint16_t can_id)
 /* 封装的DM4340控制接口实现 */
 
 // PID参数定义
-#define DM4340_ANGLE_KP 1.4f
+#define DM4340_ANGLE_KP 4.0f
 #define DM4340_ANGLE_KI 0.0f
-#define DM4340_ANGLE_KD 4.0f
-#define DM4340_ANGLE_OUT_MAX 25.0f
+#define DM4340_ANGLE_KD 2.0f
+#define DM4340_ANGLE_OUT_MAX 30.0f
 
-#define DM4340_SPEED_KP 0.4f
+#define DM4340_SPEED_KP 2.0f
 #define DM4340_SPEED_KI 0.0f
-#define DM4340_SPEED_KD 0.0f
-#define DM4340_SPEED_OUT_MAX 15.0f
+#define DM4340_SPEED_KD 1.0f
+//#define DM4340_SPEED_OUT_MAX 10.0f
+#define DM4340_SPEED_OUT_MAX 3.0f
 
 /**
   * @brief  DM4340控制初始化
