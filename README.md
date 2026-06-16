@@ -86,12 +86,22 @@ RM-C-board-volleyball/
 ├── Drivers/
 │   ├── CMSIS/                     # ARM CMSIS 核心库
 │   └── STM32F4xx_HAL_Driver/      # ST HAL 驱动库
+├── docs/
+│   └── DEBUG.md                   # 详细调试指南
+├── scripts/
+│   └── debug/
+│       ├── auto_test_can.py       # 自动化 CAN 测试脚本
+│       ├── debug_can.sh           # 交互式调试启动脚本
+│       └── README.md              # 调试脚本使用说明
+├── config/
+│   ├── daplink.cfg                # DAPLink 调试配置（当前使用）
+│   └── stlink.cfg                 # ST-Link 调试配置
 ├── LED.ioc                        # STM32CubeMX 工程配置
 ├── CMakeLists.txt                 # ARM GCC 交叉编译配置
 ├── STM32F407IGHX_FLASH.ld         # Flash 链接脚本
 ├── STM32F407IGHX_RAM.ld           # RAM 链接脚本
-└── config/
-    └── stlink.cfg                 # ST-Link 调试配置
+├── CLAUDE.md                      # Claude Code 项目指南
+└── README.md                      # 本文件
 ```
 
 > 注：CubeMX 工程名为 `LED.ioc`，因此编译产物命名为 `LED.elf/hex/bin`。
@@ -162,7 +172,7 @@ float Wz = -(uart_y / 100.0f) + z_normalized * 5;   // 左右运动
 | ARM GCC | `arm-none-eabi-gcc` 交叉编译器 | `sudo apt install gcc-arm-none-eabi` |
 | CMake | >= 3.30 | `sudo apt install cmake` |
 | STM32CubeMX | 外设配置（可选，修改 .ioc 时需要） | [ST 官网下载](https://www.st.com/en/development-tools/stm32cubemx.html) |
-| ST-Link | 调试下载器（硬件） | — |
+| DAPLink/ST-Link | 调试下载器（硬件） | — |
 | OpenOCD / STM32CubeProgrammer | 烧录工具 | `sudo apt install openocd` |
 
 ## 编译与烧录
@@ -185,12 +195,17 @@ make -j$(nproc)
 ### 烧录
 
 ```bash
+# 使用 OpenOCD + DAPLink/CMSIS-DAP（推荐）
+openocd -f config/daplink.cfg -c "program cmake-build-debug/LED.elf verify reset exit"
+
 # 使用 OpenOCD + ST-Link
 openocd -f config/stlink.cfg -c "program cmake-build-debug/LED.elf verify reset exit"
 
 # 或使用 STM32CubeProgrammer
 STM32_Programmer_CLI -c port=SWD -w cmake-build-debug/LED.bin 0x08000000 -v -rst
 ```
+
+> **注意**：本项目当前使用 **DAPLink/CMSIS-DAP** 调试器，使用 `config/daplink.cfg` 配置文件。如果使用 ST-Link，请改用 `config/stlink.cfg`。
 
 ## 通信协议
 
@@ -224,16 +239,30 @@ wheel4 =  (Vx - Vy + Wz) × speed_scale    // 左后
 
 > 麦克纳姆轮（Mecanum Wheel）是一种带有斜向滚子的特殊车轮，4 个麦轮组合可实现全向移动（前后、左右平移、原地旋转）。
 
+## 调试与测试
+
+### 快速测试 CAN 电机连接
+
+```bash
+# 自动化测试所有电机
+openocd -f config/daplink.cfg &
+python3 scripts/debug/auto_test_can.py
+```
+
+详细的调试指南请参阅 [docs/DEBUG.md](docs/DEBUG.md)。
+
 ## 常见问题
 
 | 问题 | 解决方案 |
 |------|---------|
 | 编译报错找不到交叉编译器 | `sudo apt install gcc-arm-none-eabi` |
-| 烧录失败 | 检查 ST-Link 连接，确认供电正常 |
-| 电机无反应 | 检查 CAN 接线、终端电阻，确认电机 ID 正确 |
+| 烧录失败 | 检查调试器连接（DAPLink/ST-Link），确认供电正常 |
+| OpenOCD 连接失败 | 检查 `lsusb` 输出，确认使用正确的配置文件（daplink.cfg 或 stlink.cfg） |
+| 电机无反应 | 检查 CAN 接线、终端电阻，确认电机 ID 正确，使用调试脚本测试 |
 | 遥控器无响应 | 检查 SBUS 接收器接线（USART3），确认遥控器已对频 |
 | 上位机坐标不生效 | 确认拨杆处于 type=2 模式，检查串口波特率 115200 |
-| DM4340 电机 MIT 模式配置 | 通过 DM 上位机工具设置电机 ID 和控制模式 |
+| DM4340 电机 MIT 模式配置 | 通过 DM 上位机工具设置电机 ID 和控制模式，确认已发送使能命令 |
+| GDB 调试无符号 | 确认使用 Debug 构建：`cmake -DCMAKE_BUILD_TYPE=Debug ..` |
 
 ## 许可证
 

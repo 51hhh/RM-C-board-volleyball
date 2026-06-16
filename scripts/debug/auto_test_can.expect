@@ -1,0 +1,75 @@
+#!/usr/bin/expect -f
+# Automated CAN motor communication test
+
+set timeout 10
+set test_duration 5
+
+puts "========================================="
+puts "Automated CAN Motor Communication Test"
+puts "========================================="
+puts ""
+
+# 启动 GDB
+spawn gdb-multiarch -q /home/rick/desktop/RM-C-board-volleyball/cmake-build-debug/LED.elf
+
+# 连接到 OpenOCD
+expect "(gdb)"
+send "target remote localhost:3333\r"
+expect "Remote debugging"
+
+# 复位并加载程序
+expect "(gdb)"
+send "monitor reset halt\r"
+expect "(gdb)"
+send "load\r"
+expect "Transfer rate"
+
+# 定义自定义命令
+expect "(gdb)"
+send "define print_m3508\r"
+send "printf \"M3508 Motors (CAN1):\\n\"\r"
+send "printf \"  M1\[0x201\]: ecd=%u speed=%d rpm cur=%d temp=%u\\n\", motor_chassis\[0\].ecd, motor_chassis\[0\].speed_rpm, motor_chassis\[0\].given_current, motor_chassis\[0\].temperate\r"
+send "printf \"  M2\[0x202\]: ecd=%u speed=%d rpm cur=%d temp=%u\\n\", motor_chassis\[1\].ecd, motor_chassis\[1\].speed_rpm, motor_chassis\[1\].given_current, motor_chassis\[1\].temperate\r"
+send "printf \"  M3\[0x203\]: ecd=%u speed=%d rpm cur=%d temp=%u\\n\", motor_chassis\[2\].ecd, motor_chassis\[2\].speed_rpm, motor_chassis\[2\].given_current, motor_chassis\[2\].temperate\r"
+send "printf \"  M4\[0x204\]: ecd=%u speed=%d rpm cur=%d temp=%u\\n\", motor_chassis\[3\].ecd, motor_chassis\[3\].speed_rpm, motor_chassis\[3\].given_current, motor_chassis\[3\].temperate\r"
+send "end\r"
+
+expect "(gdb)"
+send "define print_dm4340\r"
+send "printf \"DM4340 Motors (CAN2):\\n\"\r"
+send "printf \"  DM1\[ID1\]: pos=%.3f spd=%.3f cur=%.3f\\n\", DM4340_Date\[0\].esc_back_position, DM4340_Date\[0\].esc_back_speed, DM4340_Date\[0\].esc_back_current\r"
+send "printf \"  DM2\[ID2\]: pos=%.3f spd=%.3f cur=%.3f\\n\", DM4340_Date\[1\].esc_back_position, DM4340_Date\[1\].esc_back_speed, DM4340_Date\[1\].esc_back_current\r"
+send "printf \"  DM3\[ID3\]: pos=%.3f spd=%.3f cur=%.3f\\n\", DM4340_Date\[2\].esc_back_position, DM4340_Date\[2\].esc_back_speed, DM4340_Date\[2\].esc_back_current\r"
+send "end\r"
+
+# 启动程序
+expect "(gdb)"
+puts "\n>>> Starting program execution for $test_duration seconds...\n"
+send "continue &\r"
+
+# 等待一段时间让CAN消息积累
+sleep $test_duration
+
+# 中断程序
+send "\003"
+expect "(gdb)"
+puts "\n>>> Program paused. Checking motor status...\n"
+
+# 检查 M3508 电机
+send "print_m3508\r"
+expect "(gdb)"
+
+# 检查 DM4340 电机
+send "print_dm4340\r"
+expect "(gdb)"
+
+puts "\n========================================="
+puts "Test completed!"
+puts "========================================="
+puts "Exiting GDB...\n"
+
+send "quit\r"
+expect "Quit anyway?"
+send "y\r"
+
+expect eof
