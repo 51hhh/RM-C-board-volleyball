@@ -1,0 +1,32 @@
+# CMake 构建目录
+cmake-build-debug/
+cmake-build-release/
+build/
+Build/
+
+# 编译产物
+*.o
+*.obj
+*.elf
+*.bin
+*.hex
+*.map
+*.d
+*.su
+
+# IDE 配置
+.vscode/
+.idea/
+*.iml
+
+# 临时文件
+*.swp
+*.swo
+*~
+.DS_Store
+
+# GDB 调试
+.gdb_history
+
+# OpenOCD
+openocd.log

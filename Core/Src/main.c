@@ -25,12 +25,6 @@
 #include "usart.h"
 #include "gpio.h"
 
-#define UART1_RX_BUFFER_SIZE 128
-uint8_t uart1_rx_buffer[UART1_RX_BUFFER_SIZE];
-uint8_t uart1_rx_byte; // 单字节接收缓冲区
-uint8_t uart1_line_buffer[128]; // 行缓冲区
-uint16_t uart1_line_pos = 0; // 行缓冲区当前位置
-
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 // 自定义头文件
@@ -105,6 +99,13 @@ void process_uart_queue(void) {
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
+
+// UART1 接收缓冲区定义
+#define UART1_RX_BUFFER_SIZE 128
+uint8_t uart1_rx_buffer[UART1_RX_BUFFER_SIZE];
+uint8_t uart1_rx_byte; // 单字节接收缓冲区
+uint8_t uart1_line_buffer[128]; // 行缓冲区
+uint16_t uart1_line_pos = 0; // 行缓冲区当前位置
 
 double msp(double x, double in_min, double in_max, double out_min, double out_max)//映射函数，将编码器的值（0~8191）转换为弧度制的角度值（-pi~pi）
 {
@@ -231,14 +232,14 @@ int main(void)
   MX_DMA_Init();
   MX_CAN1_Init();
   MX_USART1_UART_Init();
-  // 启动USART1单字节接收模式
-  HAL_UART_Receive_IT(&huart1, &uart1_rx_byte, 1);
-  
   MX_USART3_UART_Init();
   MX_CAN2_Init();
   MX_SPI1_Init();
   MX_TIM10_Init();
   /* USER CODE BEGIN 2 */
+    // 启动USART1单字节接收模式
+    HAL_UART_Receive_IT(&huart1, &uart1_rx_byte, 1);
+
     // 时间刻初始化
     current_time_stamp = HAL_GetTick();
     previous_time_stamp  = HAL_GetTick();
@@ -561,7 +562,7 @@ void SystemClock_Config(void)
   __HAL_RCC_PWR_CLK_ENABLE();
   __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
 
-    // 先将时钟源选择为内部时钟
+    // 先将时钟源选择为内部时钟（GDB调试时避免时钟跑飞）
     RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_SYSCLK;
     RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI;
     if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_5) != HAL_OK)
