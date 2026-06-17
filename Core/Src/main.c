@@ -36,6 +36,7 @@
 #include "../application/CAN_receive.h"
 #include "../application/remote_control.h"
 #include "../application/BMI088driver.h"
+#include "scheduler.h"   // 1kHz 时基 + 延时事件调度
 
 // 位置环PID控制器
 motor_pid_t pos_x_pid, pos_y_pid;
@@ -63,10 +64,21 @@ uart_queue_item_t uart_queue[UART_QUEUE_SIZE];
 uint16_t uart_queue_head = 0;
 uint16_t uart_queue_tail = 0;
 uint8_t dma_tx_complete = 1;  // DMA 传输完成标志位
-int16_t led_cnt;  // LED计数器
+uint32_t led_blink_stamp = 0;  // LED 心跳：上次翻转的时间戳(ms)
+
+/* ===== 主循环模块化：共享控制状态（原为 main() 局部变量，提升为文件作用域）===== */
+static const RC_ctrl_t *rc_ctrl_point;            // 遥控器数据指针
+static char uart_buffer[256];                     // UART 输出缓冲区
+static float target_speed1, target_speed2, target_speed3, target_speed4; // 麦轮目标转速(rpm)
+static motor_pid_t motor1_pid, motor2_pid, motor3_pid, motor4_pid;       // 4 个底盘电机速度环
+
+/* ===== 多频率调度参数 =====
+ * 时基由 TIM6@1kHz 提供(见 scheduler.c)，主控制链每拍(1ms)执行；
+ * 低频任务在 app_scheduler 中按节拍分频调用。
+ * 注意：pid_calc 无 dt，依赖 dt 的控制任务必须每拍执行，不可降频。
+ */
+#define TELEM_PERIOD_MS   20    // 遥测发送周期(ms)，20=50Hz
 extern motor_measure_t motor_chassis; // 外部定义的电机信息结构体
-uint8_t g_rising_edge_triggered = 0; // 下降沿触发标志位
-uint32_t g_trigger_timestamp = 0; // 下降沿触发时间戳
 
 // uart 消息发送添加队列函数
 void uart_queue_send(const char* data, uint16_t length) {
@@ -198,6 +210,224 @@ void SystemClock_Config(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
+/* ============================================================================
+ * 主循环模块化：以下函数从原 while(1) 循环体拆分而来，控制逻辑保持不变。
+ * 顺序与原循环一致；仅修复 type==2 空指针解引用、s 比较的 | -> ||。
+ * ==========================================================================*/
+
+// DM4340 执行电机：使能 + PID 控制
+static void dm4340_update(void)
+{
+    CAN_cmd_motor_control(0x1, 0, true);
+    CAN_cmd_motor_control(0x2, 0, true);
+    CAN_cmd_motor_control(0x3, 0, true);
+
+    DM4340_Control_Loop(0);
+    DM4340_Control_Loop(1);
+    DM4340_Control_Loop(2);
+}
+
+// IMU 读取（BMI088）
+static void imu_update(void)
+{
+    BMI088_read(gyro, accel, &temp);
+}
+
+// 遥控器读取 + 模式选择（右拨杆）
+static void remote_update(void)
+{
+    rc_ctrl_point = get_remote_control_point();
+    if (rc_ctrl_point != NULL) {
+        char s = rc_ctrl_point->rc.s[0];
+        if (s == '\003' || s == '\000') { type = 3; }  // 初始0位/中档3位 失能
+        if (s == '\001') { type = 1; }                 // 上拨1位 遥控控制
+        if (s == '\002') { type = 0; }                 // 下拨2位 角度保持
+    }
+}
+
+// 状态机 + 麦克纳姆轮解算 -> target_speed1..4
+static void state_machine_update(void)
+{
+    // type 0：IMU 零偏校准，2 秒后进入 type 2
+    if (type == 0) {
+        if (current_time_stamp > 2000) {
+            current_angle_err = current_angle / 1000;
+            current_angle = 0;
+            type = 2;
+        }
+        if (current_time_stamp > 1000) {
+            current_angle += gyro[2] * (current_time_stamp - previous_time_stamp);
+        }
+    }
+
+    // type 1：纯遥控模式
+    if (type == 1) {
+        if (rc_ctrl_point != NULL) {
+            float z = -((float) rc_ctrl_point->rc.ch[0]);
+            float y = (float) rc_ctrl_point->rc.ch[1];
+            float x = -((float) rc_ctrl_point->rc.ch[2]);
+            float w = (float) rc_ctrl_point->rc.ch[3];
+
+            float x_normalized = x / 660.0f;
+            float y_normalized = y / 660.0f;
+            float z_normalized = z / 660.0f;
+            float w_normalized = w / 660.0f;
+
+            float Vx = 0.0f;
+            float Vy = 0.0f;
+            float Wz = 0.0f;
+
+            float deadzone = 0.05f;
+            if (fabs(x_normalized) < deadzone) { x_normalized = 0.0f; }
+            if (fabs(y_normalized) < deadzone) { y_normalized = 0.0f; }
+            if (fabs(z_normalized) < deadzone) { z_normalized = 0.0f; }
+            if (fabs(w_normalized) < deadzone) { w_normalized = 0.0f; }
+
+            Vx = y_normalized;  // 上下摇杆：前进/后退
+            Vy = x_normalized;  // 左右摇杆：左右平移
+            Wz = z_normalized;  // 旋转
+
+            target_speed1 = -(Vx + Vy + Wz) * 1000 * (w_normalized + 1); // 右前
+            target_speed2 =  (Vx - Vy - Wz) * 1000 * (w_normalized + 1); // 左前
+            target_speed3 = -(Vx + Vy - Wz) * 1000 * (w_normalized + 1); // 右后
+            target_speed4 =  (Vx - Vy + Wz) * 1000 * (w_normalized + 1); // 左后
+        }
+    }
+
+    // type 2：自动追球 + 遥控融合（Wz 回正补偿）
+    if (type == 2) {
+        if (rc_ctrl_point != NULL) {   // [修复] 原代码缺少空指针保护，丢遥控时会崩
+            float z = -((float) rc_ctrl_point->rc.ch[0]);
+            float y = (float) rc_ctrl_point->rc.ch[1];
+            float x = -((float) rc_ctrl_point->rc.ch[2]);
+            float w = (float) rc_ctrl_point->rc.ch[3];
+
+            float x_normalized = x / 660.0f;
+            float y_normalized = y / 660.0f;
+            float z_normalized = z / 660.0f;
+            float w_normalized = w / 660.0f;
+
+            float deadzone = 0.05f;
+            if (fabs(x_normalized) < deadzone) { x_normalized = 0.0f; }
+            if (fabs(y_normalized) < deadzone) { y_normalized = 0.0f; }
+            if (fabs(z_normalized) < deadzone) { z_normalized = 0.0f; }
+            if (fabs(w_normalized) < deadzone) { w_normalized = 0.0f; }
+
+            // Wz 回正控制
+            float dt = current_time_stamp - previous_time_stamp;
+            current_angle += (gyro[2] * dt) - (dt * current_angle_err);
+            float wz_compensation = pid_calc(&wz_pid, target_wz, current_angle);
+
+            // 上位机坐标 + 遥控融合
+            float Vx = -(uart_x / 100.0f) + y_normalized * 5;
+            float Vy = x_normalized * 5 + wz_compensation;
+            float Wz = -(uart_y / 100.0f) + z_normalized * 5;
+
+            target_speed1 = -(Vx + Vy + Wz) * 1000 * (w_normalized + 1); // 右前
+            target_speed2 =  (Vx - Vy - Wz) * 1000 * (w_normalized + 1); // 左前
+            target_speed3 = -(Vx + Vy - Wz) * 1000 * (w_normalized + 1); // 右后
+            target_speed4 =  (Vx - Vy + Wz) * 1000 * (w_normalized + 1); // 左后
+        }
+    }
+
+    // type 3：失能
+    if (type == 3) {
+        target_speed1 = 0;
+        target_speed2 = 0;
+        target_speed3 = 0;
+        target_speed4 = 0;
+    }
+}
+
+// 底盘速度环 PID + 电流下发
+static void chassis_pid_update(void)
+{
+    const motor_measure_t *motor1 = get_chassis_motor_measure_point(0);
+    const motor_measure_t *motor2 = get_chassis_motor_measure_point(1);
+    const motor_measure_t *motor3 = get_chassis_motor_measure_point(2);
+    const motor_measure_t *motor4 = get_chassis_motor_measure_point(3);
+
+    float output1 = pid_calc(&motor1_pid, target_speed1, motor1->speed_rpm);
+    float output2 = pid_calc(&motor2_pid, target_speed2, motor2->speed_rpm);
+    float output3 = pid_calc(&motor3_pid, target_speed3, motor3->speed_rpm);
+    float output4 = pid_calc(&motor4_pid, target_speed4, motor4->speed_rpm);
+
+    CAN_cmd_chassis((int16_t)output1, (int16_t)output2, (int16_t)output3, (int16_t)output4);
+}
+
+// 加速度计卡尔曼滤波
+static void imu_kalman_update(void)
+{
+    accel_x = accel[0];
+    accel_y = accel[1];
+    accel_z = accel[2];
+
+    kalman_filter_accel(accel_x, &accel_x_true, &accel_x_bias, 0);
+    kalman_filter_accel(accel_y, &accel_y_true, &accel_y_bias, 1);
+    kalman_filter_accel(accel_z, &accel_z_true, &accel_z_bias, 2);
+}
+
+// EXTI 上升沿触发的延时任务（DM4340 设角度）
+// 延时回调：EXTI 触发 500ms 后让 DM4340 回到 0.1 弧度
+// （替代原 g_rising_edge_triggered 轮询，由事件调度器 schedule_after 调用）
+static void cb_dm_recover(void)
+{
+    DM4340_Set_Target_Angle(0, 0.1);
+    DM4340_Set_Target_Angle(1, 0.1);
+    DM4340_Set_Target_Angle(2, 0.1);
+}
+
+// 遥测发送（调用频率由 app_scheduler 分频控制，已移出控制热路径）
+static void telemetry_update(void)
+{
+    s_motor_data_t *motor = &DM4340_Date[0];
+    sprintf(uart_buffer, "%f,%f,%f,%f\r\n",
+            motor->esc_back_position, motor->f_p, motor->esc_back_speed, motor->out_current);
+    uart_queue_send(uart_buffer, strlen(uart_buffer));
+}
+
+// 后台任务：LED 心跳 + UART 发送队列
+static void housekeeping(void)
+{
+    // LED 心跳：基于系统时间每 500ms 翻转一次，与主循环速度解耦。
+    if (current_time_stamp - led_blink_stamp >= 500) {
+        led_blink_stamp = current_time_stamp;
+        HAL_GPIO_TogglePin(GPIOH, GPIO_PIN_11);
+    }
+
+    // 处理 UART 发送队列（DMA 空闲时发送）
+    if (dma_tx_complete == 1) {
+        process_uart_queue();
+    }
+}
+
+/* ============================================================================
+ * 主调度器：由 TIM6 1kHz 节拍驱动（见 main 的 while(1)）。
+ * 控制链每拍执行（dt 恒为 1ms）；低频任务按节拍分频 + 相位错开调用。
+ * ==========================================================================*/
+static void app_scheduler(uint32_t t)
+{
+    previous_time_stamp = current_time_stamp;
+    current_time_stamp  = t;
+
+    /* ---- 1kHz：完整控制链（与重构前等价，dt 恒 1ms）---- */
+    dm4340_update();          // DM4340 使能 + PID
+    imu_update();             // BMI088 读取
+    remote_update();          // 遥控器 + 模式选择
+    state_machine_update();   // 状态机 + 麦轮解算
+    chassis_pid_update();     // 底盘速度环 + 电流下发
+    imu_kalman_update();      // 加速度卡尔曼
+
+    /* ---- 低频任务：模运算分频 + 相位错开 ----
+     * 注意：依赖 dt 的控制任务不可放到低频槽。 */
+    if (t % TELEM_PERIOD_MS == 7) telemetry_update();   // 50Hz 遥测
+    // if (t % 10 == 3) some_100hz_task();              // 100Hz 任务示例
+
+    /* ---- 延时事件 + 后台任务 ---- */
+    sched_tick(t);            // 扫描到期的延时触发（击球时序等）
+    housekeeping();           // LED 心跳 + UART 队列
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -247,17 +477,8 @@ int main(void)
     while (BMI088_init());              // BMI088 初始化
     can_filter_init();                  // can初始化
     remote_control_init();              // 遥控器初始化
-    const RC_ctrl_t *rc_ctrl_point;     // 声明遥控器数据指针
-    char uart_buffer[256];              // 定义 UART 输出缓冲区
 
-    // 目标速度
-    float target_speed1 = 0.0f; // rpm
-    float target_speed2 = 0.0f; // rpm
-    float target_speed3 = 0.0f; // rpm
-    float target_speed4 = 0.0f; // rpm
-
-    // 初始化四个底盘电机的 PID 控制器
-    motor_pid_t motor1_pid, motor2_pid, motor3_pid, motor4_pid;
+    // 初始化四个底盘电机的 PID 控制器（变量已提升为文件作用域）
     pid_init(&motor1_pid, 3.5, 0.01, 0.0, 30000, 16384); // 调整参数
     pid_init(&motor2_pid, 3.5, 0.01, 0.0, 30000, 16384); // 调整参数
     pid_init(&motor3_pid, 3.5, 0.01, 0.0, 30000, 16384); // 调整参数
@@ -277,273 +498,25 @@ int main(void)
     DM4340_Control_Init(1);
     DM4340_Control_Init(2);
 
+    timebase_init();         // 启动 TIM6@1kHz 时基 + DWT 微秒计时
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-      // DM电机使能
-      CAN_cmd_motor_control(0x1,0,true);
-      CAN_cmd_motor_control(0x2,0,true);
-      CAN_cmd_motor_control(0x3,0,true);
-
-      DM4340_Control_Loop(0);  // 执行PID计算
-      DM4340_Control_Loop(1);
-      DM4340_Control_Loop(2);
-
-      // 时间刻记录
-      current_time_stamp = HAL_GetTick();
-
-      // BMI088读取
-      BMI088_read(gyro, accel, &temp);
-
-      // 获取遥控器数据指针
-      rc_ctrl_point = get_remote_control_point();
-
-      if (rc_ctrl_point != NULL){
-          // 遥控右拨杆控制
-          char s = rc_ctrl_point->rc.s[0];
-          if (s == '\003' | s == '\000'){type=3;}       // 初始0位中档3位 失能
-          if (s == '\001'){type=1;}                     // 上拨1位 遥控控制
-          if (s == '\002'){type=0;}                     // 下拨2位 角度保持
-      }
-
-      // 初始化
-      if (type == 0){
-          if (current_time_stamp>2000){
-              current_angle_err = current_angle /1000;
-              current_angle = 0;
-              type = 2;
-          }
-          if (current_time_stamp>1000){
-              current_angle += gyro[2] * ( current_time_stamp - previous_time_stamp );            // 积分得到当前角度 (gyro[2] 是 Z 轴角速度)
-          }
-      }
-
-      if (type == 1){
-          if (rc_ctrl_point != NULL){
-              // 获取摇杆数据
-              float z = -((float) rc_ctrl_point->rc.ch[0]); // 左右摇杆，右为正
-              float y = (float) rc_ctrl_point->rc.ch[1]; // 上下摇杆，上为正
-              float x = -((float) rc_ctrl_point->rc.ch[2]); // 旋转
-              float w = (float) rc_ctrl_point->rc.ch[3];  // 速度
-
-              // 映射摇杆数据到 -1 到 1 的范围
-              float x_normalized = x / 660.0f;
-              float y_normalized = y / 660.0f;
-              float z_normalized = z / 660.0f;
-              float w_normalized = w / 660.0f;
-
-
-              // 定义底盘速度变量
-              float Vx = 0.0f;
-              float Vy = 0.0f;
-              float Wz = 0.0f;
-
-
-              // 添加死区
-              float deadzone = 0.05f;
-              if (fabs(x_normalized) < deadzone) {
-                  x_normalized = 0.0f;
-              }
-              if (fabs(y_normalized) < deadzone) {
-                  y_normalized = 0.0f;
-              }
-              if (fabs(z_normalized) < deadzone) {
-                  z_normalized = 0.0f;
-              }
-              if (fabs(w_normalized) < deadzone) {
-                  w_normalized = 0.0f;
-              }
-
-
-
-              // 根据摇杆数据计算底盘速度
-              Vx = y_normalized;  // 上下摇杆控制前进/后退，上为正，前进
-              Vy = x_normalized;  // 左右摇杆控制左右移动，右为正，左移
-              Wz = z_normalized;  // 另一个摇杆控制旋转，正为逆时针
-
-
-
-              // 根据底盘速度计算麦克纳姆轮速度
-              target_speed1 = -(Vx + Vy + Wz)*1000*(w_normalized+1); // 右前方轮
-              target_speed2 = (Vx - Vy - Wz)*1000*(w_normalized+1); // 左前方轮
-              target_speed3 = -(Vx + Vy - Wz)*1000*(w_normalized+1); // 右后方轮
-              target_speed4 = (Vx - Vy + Wz)*1000*(w_normalized+1); // 左后方轮
-
-
-          }
-      }
-    //   // 状态二底盘Wz维持
-    //   if (type == 2){
-    //       // 定义底盘速度变量
-    //       float Vx = 0.0f;
-    //       float Vy = 0.0f;
-    //       float Wz = 0.0f;
-
-
-    //       // Wz 控制
-    //       float dt = current_time_stamp - previous_time_stamp;
-    //       current_angle += (gyro[2] * dt) - (dt * current_angle_err);            // 积分得到当前角度 (gyro[2] 是 Z 轴角速度)
-
-    //       float wz_compensation = pid_calc(&wz_pid, target_wz, current_angle);// 计算 PID 控制器输出，用于补偿 Wz
-    //       Wz = wz_compensation;
-
-    //       // 根据底盘速度计算麦克纳姆轮速度
-    //       target_speed1 = -(Vx + Vy + Wz)*1000; // 右前方轮
-    //       target_speed2 = (Vx - Vy - Wz)*1000; // 左前方轮
-    //       target_speed3 = -(Vx + Vy - Wz)*1000; // 右后方轮
-    //       target_speed4 = (Vx - Vy + Wz)*1000; // 左后方轮
-
-    //   }
-      if(type == 2){
-
-          // 获取摇杆数据
-          float z = -((float) rc_ctrl_point->rc.ch[0]); // 左右摇杆，右为正
-          float y = (float) rc_ctrl_point->rc.ch[1]; // 上下摇杆，上为正
-          float x = -((float) rc_ctrl_point->rc.ch[2]); // 旋转
-          float w = (float) rc_ctrl_point->rc.ch[3];  // 速度
-
-          // 映射摇杆数据到 -1 到 1 的范围
-          float x_normalized = x / 660.0f;
-          float y_normalized = y / 660.0f;
-          float z_normalized = z / 660.0f;
-          float w_normalized = w / 660.0f;
-
-
-          // 添加死区
-          float deadzone = 0.05f;
-          if (fabs(x_normalized) < deadzone) {
-              x_normalized = 0.0f;
-          }
-          if (fabs(y_normalized) < deadzone) {
-              y_normalized = 0.0f;
-          }
-          if (fabs(z_normalized) < deadzone) {
-              z_normalized = 0.0f;
-          }
-          if (fabs(w_normalized) < deadzone) {
-              w_normalized = 0.0f;
-          }
-
-
-
-          // 陀螺仪
-          // Wz 控制
-          float dt = current_time_stamp - previous_time_stamp;
-          current_angle += (gyro[2] * dt) - (dt * current_angle_err);            // 积分得到当前角度 (gyro[2] 是 Z 轴角速度)
-
-          float wz_compensation = pid_calc(&wz_pid, target_wz, current_angle);// 计算 PID 控制器输出，用于补偿 Wz
-
-
-          // 使用从串口接收的坐标控制底盘
-           float Vx = -(uart_x / 100.0f) + y_normalized*5;  // 前后
-           float Vy = x_normalized*5 + wz_compensation;     // Wz旋转
-           float Wz = -(uart_y / 100.0f) + z_normalized*5;  // 左右
-
-
-
-          // 根据底盘速度计算麦克纳姆轮速度
-          target_speed1 = -(Vx + Vy + Wz)*1000*(w_normalized+1); // 右前方轮
-          target_speed2 = (Vx - Vy - Wz)*1000*(w_normalized+1); // 左前方轮
-          target_speed3 = -(Vx + Vy - Wz)*1000*(w_normalized+1); // 右后方轮
-          target_speed4 = (Vx - Vy + Wz)*1000*(w_normalized+1); // 左后方轮
-
-      }
-      if (type == 3){
-          target_speed1 = 0; // 右前方轮
-          target_speed2 = 0; // 左前方轮
-          target_speed3 = 0; // 右后方轮
-          target_speed4 = 0; // 左后方轮
-      }
-
-
-      // 获取四个电机的速度
-      const motor_measure_t *motor1 = get_chassis_motor_measure_point(0);
-      const motor_measure_t *motor2 = get_chassis_motor_measure_point(1);
-      const motor_measure_t *motor3 = get_chassis_motor_measure_point(2);
-      const motor_measure_t *motor4 = get_chassis_motor_measure_point(3);
-
-
-      // PID 计算
-      float output1 = pid_calc(&motor1_pid, target_speed1, motor1->speed_rpm);
-      float output2 = pid_calc(&motor2_pid, target_speed2, motor2->speed_rpm);
-      float output3 = pid_calc(&motor3_pid, target_speed3, motor3->speed_rpm);
-      float output4 = pid_calc(&motor4_pid, target_speed4, motor4->speed_rpm);
-
-      // 电流控制 (将 PID 输出转换为 int16_t 类型)
-      CAN_cmd_chassis((int16_t)output1, (int16_t)output2, (int16_t)output3, (int16_t)output4);
-//      CAN_cmd_chassis1((int16_t)output1,(int16_t)output2);
-//      CAN_cmd_chassis2((int16_t)output3, (int16_t)output4);
-
-
-
-
-
-      accel_x = accel[0];
-      accel_y = accel[1];
-      accel_z = accel[2];
-
-
-      // 卡尔曼滤波
-      kalman_filter_accel(accel_x, &accel_x_true, &accel_x_bias, 0);
-      kalman_filter_accel(accel_y, &accel_y_true, &accel_y_bias, 1);
-      kalman_filter_accel(accel_z, &accel_z_true, &accel_z_bias, 2);
-
-
-      // 电机速度格式化
-//      sprintf(uart_buffer, "%d,%d,%d,%d\r\n",
-//              motor1->speed_rpm, motor2->speed_rpm, motor3->speed_rpm, motor4->speed_rpm);
-//      uart_queue_send(uart_buffer,strlen(uart_buffer));
-
-      // 输出dm电机参数
-      s_motor_data_t *motor = &DM4340_Date[0];
-      sprintf(uart_buffer, "%f,%f,%f,%f\r\n",
-              motor->esc_back_position, motor->f_p, motor->esc_back_speed, motor->out_current);
-      uart_queue_send(uart_buffer,strlen(uart_buffer));
-
-
-
-
-    // 处理上升沿触发的延时任务
-    if (g_rising_edge_triggered && (HAL_GetTick() - g_trigger_timestamp >= 500))
-    {
-        // 设置目标角度(弧度)
-        DM4340_Set_Target_Angle(0, 0.1);
-        DM4340_Set_Target_Angle(1, 0.1);
-        DM4340_Set_Target_Angle(2, 0.1);
-        g_rising_edge_triggered = 0; // 重置标志位
-    }
-    
-
-      led_cnt ++;// LED计数器自增
-      if (led_cnt == 2)
+      // 由 TIM6 1kHz 中断驱动：中断里置 g_tick_flag，主循环消费一次即跑一拍调度。
+      // 即使某拍处理超过 1ms 偶尔丢标志，g_tick 仍是最新值，dt 能反映真实流逝时间。
+      if (g_tick_flag)
       {
-          led_cnt = 0;
-          HAL_GPIO_TogglePin(GPIOH,GPIO_PIN_11); //blink cycle 500ms
-          // 翻转GPIOH, PIN11引脚的电平，实现LED闪烁，周期为500ms (250 * 2ms)
-
-
-          if(dma_tx_complete == 1){
-              // 处理uart消息队列
-              process_uart_queue();
-          }
-     }
-
-
-
-
-
-
-//      HAL_Delay(40);
-
-
+          g_tick_flag = 0;
+          app_scheduler(g_tick);
+      }
 
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-      previous_time_stamp = current_time_stamp;
   }
   /* USER CODE END 3 */
 }
@@ -663,18 +636,14 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
                 snprintf(temp_buffer, sizeof(temp_buffer), 
                         "[INT] PB12 Rising Edge at %lums\r\n", current_time);
             } else {
-                // 下降沿触发
-
-                // 设置目标角度(弧度)
+                // 下降沿触发：立即设角度 1.1，并在 500ms 后非阻塞回到 0.1
                 DM4340_Set_Target_Angle(0, 1.1);
                 DM4340_Set_Target_Angle(1, 1.1);
                 DM4340_Set_Target_Angle(2, 1.1);
 
-                g_rising_edge_triggered = 1; // 设置下降沿触发标志位
-                g_trigger_timestamp = current_time; // 记录触发时间
+                schedule_after(500, cb_dm_recover); // 延时触发，替代原轮询标志位
 
-
-                snprintf(temp_buffer, sizeof(temp_buffer), 
+                snprintf(temp_buffer, sizeof(temp_buffer),
                         "[INT] PB12 Falling Edge at %lums\r\n", current_time);
             }
             
