@@ -1,11 +1,12 @@
 /**
   ******************************************************************************
   * @file    led_indicator.c
-  * @brief   板载 RGB LED 状态指示实现 (低电平点亮)
+  * @brief   板载 RGB LED 状态指示实现 (高电平点亮/共阴)
   ******************************************************************************
   */
 #include "led_indicator.h"
 #include "main.h"   /* HAL GPIO + LED_R/G/B_Pin 宏 */
+#include "scheduler.h"  /* g_tick：错误码相位锚定 */
 
 /* 高电平点亮(共阴): SET=亮, RESET=灭 */
 #define LED_ON(port, pin)   HAL_GPIO_WritePin((port), (pin), GPIO_PIN_SET)
@@ -42,6 +43,7 @@ void led_set_running(void) { s_state = LED_RUNNING; }
 void led_set_error(uint8_t code)
 {
     s_err_code = code & 0x0F;   /* 仅低 4 位 */
+    s_phase_stamp = g_tick;     /* 锚定到进入错误的时刻，保证首轮从最高位开始 */
     s_state = LED_ERROR;
 }
 
