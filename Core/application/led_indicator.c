@@ -7,9 +7,9 @@
 #include "led_indicator.h"
 #include "main.h"   /* HAL GPIO + LED_R/G/B_Pin 宏 */
 
-/* 低电平点亮: RESET=亮, SET=灭 */
-#define LED_ON(port, pin)   HAL_GPIO_WritePin((port), (pin), GPIO_PIN_RESET)
-#define LED_OFF(port, pin)  HAL_GPIO_WritePin((port), (pin), GPIO_PIN_SET)
+/* 高电平点亮(共阴): SET=亮, RESET=灭 */
+#define LED_ON(port, pin)   HAL_GPIO_WritePin((port), (pin), GPIO_PIN_SET)
+#define LED_OFF(port, pin)  HAL_GPIO_WritePin((port), (pin), GPIO_PIN_RESET)
 
 /* 错误码闪烁时序 */
 #define ERR_BIT_MS    100   /* 每位显示时长 */
