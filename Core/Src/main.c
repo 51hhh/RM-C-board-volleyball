@@ -38,6 +38,7 @@
 #include "../application/BMI088driver.h"
 #include "scheduler.h"   // 1kHz 时基 + 延时事件调度
 #include "../application/led_indicator.h"  // RGB LED 状态指示
+#include "../application/imu_filter.h"      // 加速度计卡尔曼滤波
 
 // 位置环PID控制器
 motor_pid_t pos_x_pid, pos_y_pid;
@@ -151,56 +152,7 @@ float current_angle_err = 0.0f; // 零飘
 motor_pid_t wz_pid;          // 用于 Wz 轴回正的 PID 控制器
 float target_wz = 0.0f;     // 目标Wz值，即0
 
-// 卡尔曼滤波参数 (需要根据实际情况调整)
-float Q_accel = 0.001f; // 过程噪声 (加速度)
-float Q_bias = 0.00001f; // 过程噪声 (零偏)
-float R_accel_meas = 0.01f; // 测量噪声 (加速度计)
-
-float P[2][2] = {{1.0f, 0.0f}, {0.0f, 1.0f}}; // 初始状态协方差矩阵
-
-// 卡尔曼滤波更新 (单轴)
-void kalman_filter_accel(float measured_accel, float *true_accel, float *bias, int axis) {
-    // 1. 预测步骤
-    float F[2][2] = {{1.0f, 0.0f}, {0.0f, 1.0f}}; // 状态转移矩阵
-    float x_hat[2] = {*true_accel, *bias}; // 状态向量
-
-    // 预测状态
-    float x_hat_predicted[2];
-    x_hat_predicted[0] = F[0][0] * x_hat[0] + F[0][1] * x_hat[1];
-    x_hat_predicted[1] = F[1][0] * x_hat[0] + F[1][1] * x_hat[1];
-
-    // 预测协方差矩阵
-    float P_predicted[2][2];
-    P_predicted[0][0] = F[0][0] * P[0][0] * F[0][0] + F[0][1] * P[1][0] * F[0][0] + F[0][0] * P[0][1] * F[1][0] + F[0][1] * P[1][1] * F[1][0] + Q_accel;
-    P_predicted[0][1] = F[0][0] * P[0][0] * F[0][1] + F[0][1] * P[1][0] * F[0][1] + F[0][0] * P[0][1] * F[1][1] + F[0][1] * P[1][1] * F[1][1];
-    P_predicted[1][0] = F[1][0] * P[0][0] * F[0][0] + F[1][1] * P[1][0] * F[0][0] + F[1][0] * P[0][1] * F[1][0] + F[1][1] * P[1][1] * F[1][0];
-    P_predicted[1][1] = F[1][0] * P[0][0] * F[0][1] + F[1][1] * P[1][0] * F[0][1] + F[1][0] * P[0][1] * F[1][1] + F[1][1] * P[1][1] * F[1][1] + Q_bias;
-
-    // 2. 更新步骤
-    float H[1][2] = {{1.0f, 1.0f}}; // 测量矩阵
-    float z = measured_accel; // 测量值
-
-    // 计算残差
-    float y = z - (H[0][0] * x_hat_predicted[0] + H[0][1] * x_hat_predicted[1]);
-
-    // 计算残差协方差
-    float S = H[0][0] * P_predicted[0][0] * H[0][0] + H[0][1] * P_predicted[1][0] * H[0][0] + H[0][0] * P_predicted[0][1] * H[0][1] + H[0][1] * P_predicted[1][1] * H[0][1] + R_accel_meas;
-
-    // 计算卡尔曼增益
-    float K[2];
-    K[0] = (P_predicted[0][0] * H[0][0] + P_predicted[0][1] * H[0][1]) / S;
-    K[1] = (P_predicted[1][0] * H[0][0] + P_predicted[1][1] * H[0][1]) / S;
-
-    // 更新状态估计
-    *true_accel = x_hat_predicted[0] + K[0] * y;
-    *bias = x_hat_predicted[1] + K[1] * y;
-
-    // 更新协方差矩阵
-    P[0][0] = (1 - K[0] * H[0][0]) * P_predicted[0][0] - K[0] * H[0][1] * P_predicted[1][0];
-    P[0][1] = (1 - K[0] * H[0][0]) * P_predicted[0][1] - K[0] * H[0][1] * P_predicted[1][1];
-    P[1][0] = -K[1] * H[0][0] * P_predicted[0][0] + (1 - K[1] * H[0][1]) * P_predicted[1][0];
-    P[1][1] = -K[1] * H[0][0] * P_predicted[0][1] + (1 - K[1] * H[0][1]) * P_predicted[1][1];
-}
+// 卡尔曼滤波已抽至 Core/application/imu_filter.c (见 imu_filter.h)
 
 
 /* USER CODE END PV */
