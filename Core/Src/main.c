@@ -131,6 +131,10 @@ int type=3;
 // BMI088 变量定义
 fp32 gyro[3], accel[3], temp;
 
+// 状态机：拨杆边沿检测 + type=0 校准计时
+char     rc_sw_last = 0;          // 上一拍右拨杆值，用于边沿触发
+uint32_t calib_start_stamp = 0;   // 进入 type=0 的起始时间戳(g_tick, ms)
+
 
 // 全局变量
 float accel_x, accel_y, accel_z; // 加速度计测量值
@@ -233,30 +237,36 @@ static void imu_update(void)
     BMI088_read(gyro, accel, &temp);
 }
 
-// 遥控器读取 + 模式选择（右拨杆）
+// 遥控器读取 + 模式选择（右拨杆，边沿触发）
 static void remote_update(void)
 {
     rc_ctrl_point = get_remote_control_point();
     if (rc_ctrl_point != NULL) {
         char s = rc_ctrl_point->rc.s[0];
-        if (s == '\003' || s == '\000') { type = 3; }  // 初始0位/中档3位 失能
-        if (s == '\001') { type = 1; }                 // 上拨1位 遥控控制
-        if (s == '\002') { type = 0; }                 // 下拨2位 角度保持
+        // 仅在拨杆位置发生变化时设置 type，避免每拍重置打断状态机内部转换
+        // (原代码每拍无条件设 type，与 type 0→2 自动转换冲突，导致校准永远重启)
+        if (s != rc_sw_last) {
+            if (s == '\003' || s == '\000') { type = 3; }      // 中档/初始 失能
+            else if (s == '\001') { type = 1; }                // 上拨 遥控控制
+            else if (s == '\002') { type = 0; calib_start_stamp = current_time_stamp; } // 下拨 进入校准
+            rc_sw_last = s;
+        }
     }
 }
 
 // 状态机 + 麦克纳姆轮解算 -> target_speed1..4
 static void state_machine_update(void)
 {
-    // type 0：IMU 零偏校准，2 秒后进入 type 2
+    // type 0：IMU 零偏校准，进入后第 1~2 秒积分，2 秒末算零偏并转 type 2
     if (type == 0) {
-        if (current_time_stamp > 2000) {
+        uint32_t elapsed = current_time_stamp - calib_start_stamp;  // 相对进入校准的时间
+        if (elapsed > 1000) {
+            current_angle += gyro[2] * (current_time_stamp - previous_time_stamp);
+        }
+        if (elapsed > 2000) {
             current_angle_err = current_angle / 1000;
             current_angle = 0;
             type = 2;
-        }
-        if (current_time_stamp > 1000) {
-            current_angle += gyro[2] * (current_time_stamp - previous_time_stamp);
         }
     }
 
