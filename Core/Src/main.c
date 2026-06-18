@@ -37,6 +37,7 @@
 #include "../application/remote_control.h"
 #include "../application/BMI088driver.h"
 #include "scheduler.h"   // 1kHz 时基 + 延时事件调度
+#include "../application/led_indicator.h"  // RGB LED 状态指示
 
 // 位置环PID控制器
 motor_pid_t pos_x_pid, pos_y_pid;
@@ -64,7 +65,6 @@ uart_queue_item_t uart_queue[UART_QUEUE_SIZE];
 uint16_t uart_queue_head = 0;
 uint16_t uart_queue_tail = 0;
 uint8_t dma_tx_complete = 1;  // DMA 传输完成标志位
-uint32_t led_blink_stamp = 0;  // LED 心跳：上次翻转的时间戳(ms)
 
 /* ===== 主循环模块化：共享控制状态（原为 main() 局部变量，提升为文件作用域）===== */
 static const RC_ctrl_t *rc_ctrl_point;            // 遥控器数据指针
@@ -396,14 +396,11 @@ static void telemetry_update(void)
     uart_queue_send(uart_buffer, strlen(uart_buffer));
 }
 
-// 后台任务：LED 心跳 + UART 发送队列
+// 后台任务：LED 状态指示 + UART 发送队列
 static void housekeeping(void)
 {
-    // LED 心跳：基于系统时间每 500ms 翻转一次，与主循环速度解耦。
-    if (current_time_stamp - led_blink_stamp >= 500) {
-        led_blink_stamp = current_time_stamp;
-        HAL_GPIO_TogglePin(GPIOH, GPIO_PIN_11);
-    }
+    // RGB LED 状态指示（蓝=初始化/绿闪=运行/红绿码=错误），非阻塞由节拍驱动
+    led_update(current_time_stamp);
 
     // 处理 UART 发送队列（DMA 空闲时发送）
     if (dma_tx_complete == 1) {
@@ -484,6 +481,10 @@ int main(void)
     current_time_stamp = HAL_GetTick();
     previous_time_stamp  = HAL_GetTick();
 
+    led_init();                         // LED 初始化(熄灭)
+    led_set_init();                     // 初始化态
+    led_update(0);                       // 立即点亮蓝灯(此时调度器尚未启动)
+
     while (BMI088_init());              // BMI088 初始化
     can_filter_init();                  // can初始化
     remote_control_init();              // 遥控器初始化
@@ -509,6 +510,7 @@ int main(void)
     DM4340_Control_Init(2);
 
     timebase_init();         // 启动 TIM6@1kHz 时基 + DWT 微秒计时
+    led_set_running();       // 初始化完成，转正常运行(绿色闪烁)
 
   /* USER CODE END 2 */
 
@@ -634,9 +636,8 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
         
         // 消抖处理(50ms)
         if(current_time - last_interrupt_time > 50) {
-            // 翻转LED作为调试指示
-            HAL_GPIO_TogglePin(GPIOH, GPIO_PIN_10);
-            
+            // 注：PH10(蓝灯)现由 led_indicator 模块统一管理，此处不再翻转
+
             if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_12) == GPIO_PIN_SET) {
                 // 上升沿触发
                 // DM4340_Set_Target_Angle(0, 0);
