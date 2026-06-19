@@ -20,6 +20,7 @@
 #include "led_indicator.h"
 #include "imu_filter.h"
 #include "host_comm.h"
+#include "chassis.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -30,9 +31,7 @@
 #define RC_DEADZONE            0.05f     // 摇杆死区(归一化)，5%
 #define REMOTE_AUTO_GAIN       5.0f      // 自动模式下遥控叠加增益
 #define HOST_COORD_SCALE       100.0f    // 上位机坐标缩放(像素 -> 速度)
-#define CHASSIS_RPM_SCALE      1000.0f   // 底盘速度 -> rpm 比例
 #define DM_MOTOR_COUNT         3U        // DM4340 执行电机数(CAN2)
-#define CHASSIS_MOTOR_COUNT    4U        // M3508 底盘电机数(CAN1)
 
 // 遥控四通道归一化结果（已套死区）
 typedef struct {
@@ -45,8 +44,6 @@ typedef struct {
 static const RC_ctrl_t *rc_ctrl_point;               // 遥控器数据指针
 static char telemetry_buffer[256];                   // 遥测输出缓冲
 
-static float target_speed[CHASSIS_MOTOR_COUNT];      // 四轮目标转速(rpm)
-static motor_pid_t chassis_pid[CHASSIS_MOTOR_COUNT]; // 四轮速度环 PID
 static motor_pid_t wz_pid;                           // Wz 轴回正 PID
 static motor_pid_t pos_x_pid;                        // X 位置环(预留，当前未启用)
 static motor_pid_t pos_y_pid;                        // Y 位置环(预留，当前未启用)
@@ -91,22 +88,6 @@ static int read_remote_input(remote_input_t *input)
     input->w = apply_deadzone( ((float)rc_ctrl_point->rc.ch[3]) / RC_CH_MAX); // 速度倍率
 
     return 1;
-}
-
-// 麦克纳姆轮逆解：底盘速度(vx 前后, vy 左右, wz 旋转) -> 四轮目标转速(rpm)
-// speed_scale 为速度倍率(= 遥控 w 通道 + 1)
-static void set_chassis_target(float vx, float vy, float wz, float speed_scale)
-{
-    target_speed[0] = -(vx + vy + wz) * CHASSIS_RPM_SCALE * speed_scale; // 右前
-    target_speed[1] =  (vx - vy - wz) * CHASSIS_RPM_SCALE * speed_scale; // 左前
-    target_speed[2] = -(vx + vy - wz) * CHASSIS_RPM_SCALE * speed_scale; // 右后
-    target_speed[3] =  (vx - vy + wz) * CHASSIS_RPM_SCALE * speed_scale; // 左后
-}
-
-// 失能/停车：四轮目标清零
-static void stop_chassis(void)
-{
-    set_chassis_target(0.0f, 0.0f, 0.0f, 1.0f);
 }
 
 // DM4340 执行电机：使能 + PID 控制(CAN2，3 个 MIT 模式电机)
@@ -171,7 +152,7 @@ static void manual_chassis_update(void)
     remote_input_t input;
 
     if (read_remote_input(&input)) {
-        set_chassis_target(input.y, input.x, input.z, input.w + 1.0f);
+        chassis_set_velocity(input.y, input.x, input.z, input.w + 1.0f);
     }
 }
 
@@ -194,11 +175,11 @@ static void auto_chassis_update(void)
         float vy = input.x * REMOTE_AUTO_GAIN + wz_compensation;
         float wz = -((float)host_y / HOST_COORD_SCALE) + input.z * REMOTE_AUTO_GAIN;
 
-        set_chassis_target(vx, vy, wz, input.w + 1.0f);
+        chassis_set_velocity(vx, vy, wz, input.w + 1.0f);
     }
 }
 
-// 状态机：按 control_mode 分发，结果写入 target_speed[]
+// 状态机：按 control_mode 分发，结果经 chassis_set_velocity 写入底盘目标
 static void state_machine_update(void)
 {
     if (control_mode == 0) {
@@ -214,22 +195,8 @@ static void state_machine_update(void)
     }
 
     if (control_mode == 3) {
-        stop_chassis();            // 失能
+        chassis_stop();            // 失能
     }
-}
-
-// 底盘速度环 PID + 电流下发(CAN1 M3508)
-static void chassis_pid_update(void)
-{
-    float output[CHASSIS_MOTOR_COUNT];
-
-    for (uint8_t i = 0; i < CHASSIS_MOTOR_COUNT; i++) {
-        const motor_measure_t *motor = get_chassis_motor_measure_point(i);
-        output[i] = pid_calc(&chassis_pid[i], target_speed[i], motor->speed_rpm);
-    }
-
-    CAN_cmd_chassis((int16_t)output[0], (int16_t)output[1],
-                    (int16_t)output[2], (int16_t)output[3]);
 }
 
 // 加速度计卡尔曼滤波(逐轴独立，详见 imu_filter.c)
@@ -291,10 +258,7 @@ void robot_control_init(void)
     can_filter_init();                  // CAN 过滤器初始化
     remote_control_init();              // 遥控器初始化(USART3 DMA + 空闲中断)
 
-    // 初始化四个底盘电机的速度环 PID
-    for (uint8_t i = 0; i < CHASSIS_MOTOR_COUNT; i++) {
-        pid_init(&chassis_pid[i], 3.5f, 0.01f, 0.0f, 30000.0f, 16384.0f);
-    }
+    chassis_init();                     // 四路底盘速度环 PID 初始化
 
     pid_init(&wz_pid, 1.5f, 0.00f, 0.0f, 500.0f, 660.0f);       // Wz 正对方向 PID
     pid_init(&pos_x_pid, 0.6f, 0.01f, 0.2f, 1000.0f, 300.0f);   // X 方向位置环(预留未启用)
@@ -326,7 +290,7 @@ void robot_control_tick(uint32_t tick_ms)
     imu_update();             // BMI088 读取
     remote_update();          // 遥控器 + 模式选择
     state_machine_update();   // 状态机 + 麦轮解算
-    chassis_pid_update();     // 底盘速度环 + 电流下发
+    chassis_update();         // 底盘速度环 + 电流下发
     imu_kalman_update();      // 加速度卡尔曼
 
     /* ---- 低频任务：模运算分频 + 相位错开(避开 ==0 拥挤) ---- */
