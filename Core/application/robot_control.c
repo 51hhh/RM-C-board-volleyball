@@ -21,6 +21,7 @@
 #include "imu_filter.h"
 #include "host_comm.h"
 #include "chassis.h"
+#include "dm_motor.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -31,7 +32,6 @@
 #define RC_DEADZONE            0.05f     // 摇杆死区(归一化)，5%
 #define REMOTE_AUTO_GAIN       5.0f      // 自动模式下遥控叠加增益
 #define HOST_COORD_SCALE       100.0f    // 上位机坐标缩放(像素 -> 速度)
-#define DM_MOTOR_COUNT         3U        // DM4340 执行电机数(CAN2)
 
 // 遥控四通道归一化结果（已套死区）
 typedef struct {
@@ -45,8 +45,6 @@ static const RC_ctrl_t *rc_ctrl_point;               // 遥控器数据指针
 static char telemetry_buffer[256];                   // 遥测输出缓冲
 
 static motor_pid_t wz_pid;                           // Wz 轴回正 PID
-static motor_pid_t pos_x_pid;                        // X 位置环(预留，当前未启用)
-static motor_pid_t pos_y_pid;                        // Y 位置环(预留，当前未启用)
 
 // 状态机：拨杆边沿检测 + 校准计时
 static int control_mode = 3;          // 控制模式(原 type)：0=校准 1=遥控 2=自动 3=失能
@@ -90,17 +88,7 @@ static int read_remote_input(remote_input_t *input)
     return 1;
 }
 
-// DM4340 执行电机：使能 + PID 控制(CAN2，3 个 MIT 模式电机)
-static void dm4340_update(void)
-{
-    for (uint8_t i = 0; i < DM_MOTOR_COUNT; i++) {
-        CAN_cmd_motor_control((uint16_t)(i + 1U), 0, true);
-    }
-
-    for (uint8_t i = 0; i < DM_MOTOR_COUNT; i++) {
-        DM4340_Control_Loop(i);
-    }
-}
+// DM4340 执行机构(使能/控制环/发球)已抽至 application/dm_motor.c
 
 // IMU 读取（BMI088，SPI1）
 static void imu_update(void)
@@ -211,15 +199,6 @@ static void imu_kalman_update(void)
     kalman_filter_accel(accel_z, &accel_z_true, &accel_z_bias, 2);
 }
 
-// 延时回调：PB12 下降沿触发 500ms 后，让 DM4340 回到 0.1 弧度
-// （替代原 g_rising_edge_triggered 轮询，由事件调度器 schedule_after 调用）
-static void cb_dm_recover(void)
-{
-    for (uint8_t i = 0; i < DM_MOTOR_COUNT; i++) {
-        DM4340_Set_Target_Angle(i, 0.1f);
-    }
-}
-
 // 遥测发送（频率由 robot_control_tick 分频控制，已移出控制热路径）
 static void telemetry_update(void)
 {
@@ -259,15 +238,9 @@ void robot_control_init(void)
     remote_control_init();              // 遥控器初始化(USART3 DMA + 空闲中断)
 
     chassis_init();                     // 四路底盘速度环 PID 初始化
+    dm_motor_init();                    // 三路 DM4340 执行电机控制初始化
 
     pid_init(&wz_pid, 1.5f, 0.00f, 0.0f, 500.0f, 660.0f);       // Wz 正对方向 PID
-    pid_init(&pos_x_pid, 0.6f, 0.01f, 0.2f, 1000.0f, 300.0f);   // X 方向位置环(预留未启用)
-    pid_init(&pos_y_pid, 0.6f, 0.01f, 0.2f, 1000.0f, 300.0f);   // Y 方向位置环(预留未启用)
-
-    // DM4340 执行电机控制参数初始化(ID 1~3)
-    for (uint8_t i = 0; i < DM_MOTOR_COUNT; i++) {
-        DM4340_Control_Init(i);
-    }
 }
 
 // 初始化完成，转正常运行态(LED 绿色闪烁)
@@ -286,7 +259,7 @@ void robot_control_tick(uint32_t tick_ms)
     current_time_stamp = tick_ms;
 
     /* ---- 1kHz：完整控制链(与重构前等价，dt 恒 1ms) ---- */
-    dm4340_update();          // DM4340 使能 + PID
+    dm_motor_update();        // DM4340 使能 + 控制环 + 发球请求
     imu_update();             // BMI088 读取
     remote_update();          // 遥控器 + 模式选择
     state_machine_update();   // 状态机 + 麦轮解算
@@ -323,11 +296,9 @@ void robot_control_handle_exti(uint16_t gpio_pin)
         snprintf(temp_buffer, sizeof(temp_buffer),
                  "[INT] PB12 Rising Edge at %lums\r\n", now);
     } else {
-        // 下降沿触发：立即设角度 1.1，并在 500ms 后非阻塞回到 0.1
-        for (uint8_t i = 0; i < DM_MOTOR_COUNT; i++) {
-            DM4340_Set_Target_Angle(i, 1.1f);
-        }
-        schedule_after(500, cb_dm_recover);   // 延时触发，替代原轮询标志位
+        // 下降沿触发：请求一次发球。仅置标志，设角度 + 定时回收在主循环上下文执行
+        // (消除原先从 EXTI ISR 直接写 DM target_angle 的跨上下文访问)
+        dm_motor_request_strike();
 
         snprintf(temp_buffer, sizeof(temp_buffer),
                  "[INT] PB12 Falling Edge at %lums\r\n", now);
