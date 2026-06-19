@@ -21,7 +21,7 @@
 #include "imu_filter.h"
 #include "host_comm.h"
 #include "chassis.h"
-#include "dm_motor.h"
+#include "striker.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -115,6 +115,12 @@ static void remote_update(void)
             }
             rc_sw_last = s;
         }
+
+        // 左拨杆 s[1] 驱动发球(与底盘右拨杆共存)：上/初始=空闲，中档=准备蓄力，下拨=发球
+        char c = rc_ctrl_point->rc.s[1];
+        if (c == '\001' || c == '\000') { striker_set_mode(STRIKER_IDLE); }
+        else if (c == '\003')           { striker_set_mode(STRIKER_PREPARE); }
+        else if (c == '\002')           { striker_set_mode(STRIKER_SERVE); }
     }
 }
 
@@ -202,9 +208,10 @@ static void imu_kalman_update(void)
 // 遥测发送（频率由 robot_control_tick 分频控制，已移出控制热路径）
 static void telemetry_update(void)
 {
-    s_motor_data_t *motor = &DM4340_Date[0];
-    snprintf(telemetry_buffer, sizeof(telemetry_buffer), "%f,%f,%f,%f\r\n",
-             motor->esc_back_position, motor->f_p, motor->esc_back_speed, motor->out_current);
+    const motor_measure_t *arm  = get_can2_motor_measure_point(0); // 0x201 击球臂
+    const motor_measure_t *toss = get_can2_motor_measure_point(2); // 0x203 抛球蓄力
+    snprintf(telemetry_buffer, sizeof(telemetry_buffer), "%f,%d,%f,%d\r\n",
+             arm->real_angle, arm->speed_rpm, toss->real_angle, toss->speed_rpm);
     uart_queue_send(telemetry_buffer, strlen(telemetry_buffer));
 }
 
@@ -238,7 +245,7 @@ void robot_control_init(void)
     remote_control_init();              // 遥控器初始化(USART3 DMA + 空闲中断)
 
     chassis_init();                     // 四路底盘速度环 PID 初始化
-    dm_motor_init();                    // 三路 DM4340 执行电机控制初始化
+    striker_init();                     // 击球臂/抛球(CAN2 三电机) 双环级联 PID 初始化
 
     pid_init(&wz_pid, 1.5f, 0.00f, 0.0f, 500.0f, 660.0f);       // Wz 正对方向 PID
 }
@@ -259,7 +266,7 @@ void robot_control_tick(uint32_t tick_ms)
     current_time_stamp = tick_ms;
 
     /* ---- 1kHz：完整控制链(与重构前等价，dt 恒 1ms) ---- */
-    dm_motor_update();        // DM4340 使能 + 控制环 + 发球请求
+    striker_update(current_time_stamp); // 击球臂/抛球：多圈角度 + 双环级联 + CAN2 下发
     imu_update();             // BMI088 读取
     remote_update();          // 遥控器 + 模式选择
     state_machine_update();   // 状态机 + 麦轮解算
@@ -296,10 +303,7 @@ void robot_control_handle_exti(uint16_t gpio_pin)
         snprintf(temp_buffer, sizeof(temp_buffer),
                  "[INT] PB12 Rising Edge at %lums\r\n", now);
     } else {
-        // 下降沿触发：请求一次发球。仅置标志，设角度 + 定时回收在主循环上下文执行
-        // (消除原先从 EXTI ISR 直接写 DM target_angle 的跨上下文访问)
-        dm_motor_request_strike();
-
+        // 下降沿触发：仅记录(发球已改由遥控左拨杆 s[1] 驱动 striker 状态机)
         snprintf(temp_buffer, sizeof(temp_buffer),
                  "[INT] PB12 Falling Edge at %lums\r\n", now);
     }
