@@ -75,6 +75,7 @@ typedef struct
     int16_t given_current;  //实际转矩电流
     uint8_t temperate;      //电机温度
     int16_t last_ecd;       //上次转子机械角度
+    float    real_angle;    //转子角度(度, ecd/8192*360)，供多圈累加
 } motor_measure_t;
 
 
@@ -174,6 +175,12 @@ extern const motor_measure_t *get_trigger_motor_measure_point(void);
   * @retval         电机数据指针
   */
 extern const motor_measure_t *get_chassis_motor_measure_point(uint8_t i);
+
+/* ===== CAN2 上的 3 个 M3508：0=击球臂A(0x201) 1=击球臂B(0x202) 2=抛球蓄力(0x203) ===== */
+/* 向 CAN2 下发 3 路电流(0x200 广播帧)。击球臂双电机反相由调用方传 (+I,-I)。 */
+extern void CAN_cmd_can2(int16_t motor1, int16_t motor2, int16_t motor3);
+/* 返回 CAN2 上第 i 个 M3508 反馈数据指针 (i∈[0,2]) */
+extern const motor_measure_t *get_can2_motor_measure_point(uint8_t i);
 
 /* DM4340电机数据结构 (从vb_3wheel迁移) */
 typedef struct 

@@ -73,6 +73,7 @@ extern CAN_HandleTypeDef hcan2;
     {                                                                   \
         (ptr)->last_ecd = (ptr)->ecd;                                   \
         (ptr)->ecd = (uint16_t)((data)[0] << 8 | (data)[1]);            \
+        (ptr)->real_angle = (ptr)->ecd / 8192.0f * 360.0f;             \
         (ptr)->speed_rpm = (uint16_t)((data)[2] << 8 | (data)[3]);      \
         (ptr)->given_current = (uint16_t)((data)[4] << 8 | (data)[5]);  \
         (ptr)->temperate = (data)[6];                                   \
@@ -95,6 +96,7 @@ motor data,  0:chassis motor1 3508;1:chassis motor3 3508;2:chassis motor3 3508;3
 电机数据, 0:底盘电机1 3508电机,  1:底盘电机2 3508电机,2:底盘电机3 3508电机,3:底盘电机4 3508电机;
 4:yaw云台电机 6020电机; 5:pitch云台电机 6020电机; 6:拨弹电机 2006电机*/
 static motor_measure_t motor_chassis[7];
+static motor_measure_t motor_can2[3];   // CAN2 上的 3508：0/1=击球臂(0x201/0x202)，2=抛球蓄力(0x203)
 s_motor_data_t DM4340_Date[3]; // DM4340电机数据数组，支持3个电机
 
 static CAN_TxHeaderTypeDef  gimbal_tx_message;
@@ -149,51 +151,20 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
     if (hcan->Instance == CAN2)
     {
         HAL_CAN_GetRxMessage(&hcan2, CAN_RX_FIFO0, &rx_header_can2, rx_data_can2); // 从FIFO中接收消息至rx_header_can2
+        // CAN2 上的 3 个 M3508：0x201/0x202=击球臂双电机，0x203=抛球蓄力
+        // (DM4340 暂停用：原 0x11/12/13 解码及 DM 控制函数保留在本文件中、未被调用，便于日后恢复)
         switch (rx_header_can2.StdId)
         {
-
-        case DM4340_M1:
-        {
-
-            DM4340_Date[0].id = (rx_data_can2[0]) & 0x0F;                               // 电机ID
-            MD_CanReceive(&DM4340_Date[0], rx_data_can2);                 // 反馈帧解包
-
-            DM4340_Date[0].esc_back_position_last = DM4340_Date[0].esc_back_position;   // 上一次返回的位置 = 现在位置
-
-            motor_feedback_states[0].feedback_received = true;          // 接收到电机反馈，成功使能
-
-            FPS.DM4340_M1++;
-            break;
-        }
-        case DM4340_M2:
-        {
-            DM4340_Date[1].id = (rx_data_can2[0]) & 0x0F;
-            MD_CanReceive(&DM4340_Date[1], rx_data_can2);
-
-            DM4340_Date[1].esc_back_position_last = DM4340_Date[1].esc_back_position;
-
-            motor_feedback_states[1].feedback_received = true;
-
-            FPS.DM4340_M2++;
-            break;
-        }
-        case DM4340_M3:
-        {
-            DM4340_Date[2].id = (rx_data_can2[0]) & 0x0F;
-            MD_CanReceive(&DM4340_Date[2], rx_data_can2);
-
-            DM4340_Date[2].esc_back_position_last = DM4340_Date[2].esc_back_position;
-
-            motor_feedback_states[2].feedback_received = true;
-
-            FPS.DM4340_M3++;
-            break;
-        }
-
-        default:
-        {
-            break;
-        }
+            case CAN_3508_M1_ID:   // 0x201 击球臂电机A
+            case CAN_3508_M2_ID:   // 0x202 击球臂电机B
+            case CAN_3508_M3_ID:   // 0x203 抛球蓄力电机
+            {
+                uint8_t idx = rx_header_can2.StdId - CAN_3508_M1_ID;  // 0..2
+                get_motor_measure(&motor_can2[idx], rx_data_can2);
+                break;
+            }
+            default:
+                break;
         }
     }
 }
@@ -304,6 +275,26 @@ void CAN_cmd_chassis(int16_t motor1, int16_t motor2, int16_t motor3, int16_t mot
     HAL_CAN_AddTxMessage(&CHASSIS_CAN, &chassis_tx_message, chassis_can_send_data, &send_mail_box);
 }
 
+// CAN2 上 3 个 M3508 电流下发(0x200 广播帧 -> 0x201/0x202/0x203)。
+// 击球臂双电机反相由调用方传 (+I_arm, -I_arm)，第三路为抛球蓄力。
+void CAN_cmd_can2(int16_t motor1, int16_t motor2, int16_t motor3)
+{
+    uint32_t send_mail_box;
+    gimbal_tx_message.StdId = CAN_CHASSIS_ALL_ID;   // 0x200
+    gimbal_tx_message.IDE   = CAN_ID_STD;
+    gimbal_tx_message.RTR   = CAN_RTR_DATA;
+    gimbal_tx_message.DLC   = 0x08;
+    gimbal_can_send_data[0] = motor1 >> 8;
+    gimbal_can_send_data[1] = motor1;
+    gimbal_can_send_data[2] = motor2 >> 8;
+    gimbal_can_send_data[3] = motor2;
+    gimbal_can_send_data[4] = motor3 >> 8;
+    gimbal_can_send_data[5] = motor3;
+    gimbal_can_send_data[6] = 0;
+    gimbal_can_send_data[7] = 0;
+    HAL_CAN_AddTxMessage(&GIMBAL_CAN, &gimbal_tx_message, gimbal_can_send_data, &send_mail_box);
+}
+
 
 /**
   * @brief          return the yaw 6020 motor data point
@@ -365,6 +356,12 @@ const motor_measure_t *get_trigger_motor_measure_point(void)
 const motor_measure_t *get_chassis_motor_measure_point(uint8_t i)
 {
     return &motor_chassis[(i & 0x03)];
+}
+
+// 返回 CAN2 上第 i 个 M3508 反馈数据指针 (i∈[0,2]：0/1=击球臂，2=抛球蓄力)
+const motor_measure_t *get_can2_motor_measure_point(uint8_t i)
+{
+    return &motor_can2[i % 3];
 }
 
 
