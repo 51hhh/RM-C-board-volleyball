@@ -10,6 +10,7 @@
 
 #include "CAN_receive.h"   /* CAN_cmd_chassis / get_chassis_motor_measure_point / motor_measure_t */
 #include "pid.h"
+#include "motor_config.h"  /* 集中电机配置：CAN / ID / PID 参数 */
 
 #define CHASSIS_RPM_SCALE      1000.0f   // 底盘速度 -> rpm 比例
 #define CHASSIS_MOTOR_COUNT    4U        // M3508 底盘电机数(CAN1)
@@ -21,7 +22,8 @@ static motor_pid_t chassis_pid[CHASSIS_MOTOR_COUNT]; // 四轮速度环 PID
 void chassis_init(void)
 {
     for (uint8_t i = 0; i < CHASSIS_MOTOR_COUNT; i++) {
-        pid_init(&chassis_pid[i], 3.5f, 0.01f, 0.0f, 30000.0f, 16384.0f);
+        pid_init(&chassis_pid[i], CHASSIS_SPD_KP, CHASSIS_SPD_KI, CHASSIS_SPD_KD,
+                 CHASSIS_SPD_IMAX, CHASSIS_SPD_OUT);
     }
 }
 

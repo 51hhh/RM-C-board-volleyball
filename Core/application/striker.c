@@ -15,6 +15,7 @@
 #include "main.h"          /* HAL_GPIO(电磁铁) */
 #include "CAN_receive.h"   /* CAN_cmd_can2 / get_can2_motor_measure_point */
 #include "pid.h"           /* motor_pid_t / pid_init / pid_calc */
+#include "motor_config.h"  /* 集中电机配置：CAN / ID / PID 参数 */
 
 #include <math.h>
 
@@ -26,9 +27,7 @@
 /* #define MAGNET_GPIO_Port  GPIOB */
 /* #define MAGNET_Pin        GPIO_PIN_13 */
 
-/* ===== CAN2 反馈索引(get_can2_motor_measure_point) ===== */
-#define ARM_FB_IDX     0U     // 击球臂读 0x201 编码器
-#define TOSS_FB_IDX    2U     // 抛球蓄力读 0x203 编码器
+/* CAN2 反馈索引 ARM_FB_IDX / TOSS_FB_IDX 已集中到 motor_config.h */
 
 /* ===== 目标位(度，多圈累加坐标；起点取自原工程，需整定) ===== */
 #define ARM_IDLE_POS        0.0f
@@ -142,14 +141,14 @@ static void serve_state_machine(uint32_t now)
 void striker_init(void)
 {
     // 击球臂：常规定位(温和)
-    pid_init(&arm_angle_pid, 2.0f, 0.0f, 1.0f, 1000.0f, 1000.0f);
-    pid_init(&arm_speed_pid, 3.0f, 0.0f, 1.0f,  800.0f, 2500.0f);
+    pid_init(&arm_angle_pid, ARM_ANG_KP, ARM_ANG_KI, ARM_ANG_KD, ARM_ANG_IMAX, ARM_ANG_OUT);
+    pid_init(&arm_speed_pid, ARM_SPD_KP, ARM_SPD_KI, ARM_SPD_KD, ARM_SPD_IMAX, ARM_SPD_OUT);
     // 击球臂：强力挥击
-    pid_init(&arm_strike_angle_pid, 2.0f, 0.0f, 1.0f, 4500.0f,  6000.0f);
-    pid_init(&arm_strike_speed_pid, 3.5f, 0.0f, 1.5f, 4500.0f, 13300.0f);
+    pid_init(&arm_strike_angle_pid, ARM_STK_ANG_KP, ARM_STK_ANG_KI, ARM_STK_ANG_KD, ARM_STK_ANG_IMAX, ARM_STK_ANG_OUT);
+    pid_init(&arm_strike_speed_pid, ARM_STK_SPD_KP, ARM_STK_SPD_KI, ARM_STK_SPD_KD, ARM_STK_SPD_IMAX, ARM_STK_SPD_OUT);
     // 抛球蓄力
-    pid_init(&toss_angle_pid, 2.0f, 0.0f, 2.0f, 1000.0f, 1000.0f);
-    pid_init(&toss_speed_pid, 2.0f, 0.0f, 1.0f, 1000.0f, 2500.0f);
+    pid_init(&toss_angle_pid, TOSS_ANG_KP, TOSS_ANG_KI, TOSS_ANG_KD, TOSS_ANG_IMAX, TOSS_ANG_OUT);
+    pid_init(&toss_speed_pid, TOSS_SPD_KP, TOSS_SPD_KI, TOSS_SPD_KD, TOSS_SPD_IMAX, TOSS_SPD_OUT);
 
     s_mode = STRIKER_IDLE;
 }
