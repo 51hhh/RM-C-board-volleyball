@@ -18,8 +18,12 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "can.h"
 #include "dma.h"
+#include "spi.h"
+#include "tim.h"
 #include "usart.h"
+#include "usb_device.h"
 #include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
@@ -48,6 +52,7 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
+static uint32_t last_frame = 0U;
 
 /* USER CODE END PV */
 
@@ -68,8 +73,6 @@ void SystemClock_Config(void);
   */
 int main(void)
 {
-  uint32_t last_frame = 0U;
-
   /* USER CODE BEGIN 1 */
 
   /* USER CODE END 1 */
@@ -93,8 +96,12 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_DMA_Init();
+  MX_CAN1_Init();
   MX_USART1_UART_Init();
   MX_USART3_UART_Init();
+  MX_CAN2_Init();
+  MX_SPI1_Init();
+  MX_TIM10_Init();
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
     remote_control_init();
