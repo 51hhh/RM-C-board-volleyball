@@ -42,6 +42,7 @@ static void sbus_to_rc(volatile const uint8_t *sbus_buf, RC_ctrl_t *rc_ctrl);
 //remote control data
 //遥控器控制变量
 RC_ctrl_t rc_ctrl;
+static volatile uint32_t s_frame_count = 0U;
 
 //receive data, 18 bytes one frame, but set 36 bytes
 //接收原始数据，为18个字节，给了36个字节长度，防止DMA传输越界
@@ -117,6 +118,7 @@ void remote_control_uart3_handler(void)
             if(this_time_rx_len == RC_FRAME_LENGTH)
             {
                 sbus_to_rc(sbus_rx_buf[0], &rc_ctrl);
+                s_frame_count++;
             }
         }
         else
@@ -146,9 +148,15 @@ void remote_control_uart3_handler(void)
             {
                 //处理遥控器数据
                 sbus_to_rc(sbus_rx_buf[1], &rc_ctrl);
+                s_frame_count++;
             }
         }
     }
+}
+
+uint32_t remote_control_get_frame_count(void)
+{
+    return s_frame_count;
 }
 
 

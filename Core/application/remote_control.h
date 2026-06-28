@@ -20,6 +20,7 @@
 #define REMOTE_CONTROL_H
 #include "struct_typedef.h"
 #include "bsp_rc.h"
+#include <stdint.h>
 
 #define SBUS_RX_BUF_NUM 36u
 
@@ -102,4 +103,7 @@ extern void remote_control_init(void);
 extern const RC_ctrl_t *get_remote_control_point(void);
 
 void remote_control_uart3_handler(void);
+
+/* 返回已解码的遥控帧序号；主循环可通过该计数判断是否有新数据到达。 */
+uint32_t remote_control_get_frame_count(void);
 #endif

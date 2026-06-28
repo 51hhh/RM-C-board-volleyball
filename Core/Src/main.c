@@ -18,18 +18,14 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "can.h"
 #include "dma.h"
-#include "spi.h"
-#include "tim.h"
 #include "usart.h"
 #include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-// 自定义头文件
-#include "scheduler.h"   // 1kHz 时基 + 延时事件调度
-#include "../application/robot_control.h"  // 应用控制链
+#include "../application/remote_control.h"
+#include "../application/rc_forward.h"
 
 
 /* USER CODE END Includes */
@@ -73,10 +69,7 @@ void SystemClock_Config(void);
   */
 int main(void)
 {
-
-  /* USER CODE BEGIN 1 */
-
-  /* USER CODE END 1 */
+  uint32_t last_frame = 0U;
 
   /* MCU Configuration--------------------------------------------------------*/
 
@@ -97,16 +90,11 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_DMA_Init();
-  MX_CAN1_Init();
-  MX_USART1_UART_Init();
   MX_USART3_UART_Init();
-  MX_CAN2_Init();
-  MX_SPI1_Init();
-  MX_TIM10_Init();
+  MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
-    robot_control_init();    // 应用层初始化：通信、传感器、CAN、遥控、PID
-    timebase_init();         // 启动 TIM6@1kHz 时基 + DWT 微秒计时
-    robot_control_start();   // 初始化完成，转正常运行态
+    remote_control_init();
+    rc_forward_init();
 
   /* USER CODE END 2 */
 
@@ -114,12 +102,11 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-      // 由 TIM6 1kHz 中断驱动：中断里置 g_tick_flag，主循环消费一次即跑一拍调度。
-      // 即使某拍处理超过 1ms 偶尔丢标志，g_tick 仍是最新值，dt 能反映真实流逝时间。
-      if (g_tick_flag)
+      uint32_t now = remote_control_get_frame_count();
+      if (now != last_frame)
       {
-          g_tick_flag = 0;
-          robot_control_tick(g_tick);
+          rc_forward_poll();
+          last_frame = now;
       }
 
     /* USER CODE END WHILE */
@@ -186,7 +173,7 @@ void SystemClock_Config(void)
 /* PB12中断回调函数 */
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
-    robot_control_handle_exti(GPIO_Pin);
+    (void)GPIO_Pin;
 }
 /* USER CODE END 4 */
 
