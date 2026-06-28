@@ -11,19 +11,16 @@
 #include "remote_control.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdint.h>
 
-#if !defined(__GNUC__) || defined(__CC_ARM)
-#define USE_USB_FORWARD 0
-#else
-#define USE_USB_FORWARD 0
-#endif
+#define USE_USB_FORWARD 1
 
 static uint32_t last_forwarded = 0U;
 
 static void rc_forward_send_impl(const char *text, uint16_t len)
 {
 #if USE_USB_FORWARD
-    extern int CDC_Transmit_FS(uint8_t *buf, uint16_t len);
+    extern uint8_t CDC_Transmit_FS(uint8_t *buf, uint16_t Len);
     (void)CDC_Transmit_FS((uint8_t *)text, len);
 #else
     extern void uart_queue_send(const char *data, uint16_t length);

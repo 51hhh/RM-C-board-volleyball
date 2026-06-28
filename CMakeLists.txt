@@ -49,11 +49,27 @@ else ()
     add_compile_options(-Og -g)
 endif ()
 
-include_directories(Core/Inc Drivers/STM32F4xx_HAL_Driver/Inc Drivers/STM32F4xx_HAL_Driver/Inc/Legacy Drivers/CMSIS/Device/ST/STM32F4xx/Include Drivers/CMSIS/Include)
+include_directories(
+    Core/Inc
+    Drivers/STM32F4xx_HAL_Driver/Inc
+    Drivers/STM32F4xx_HAL_Driver/Inc/Legacy
+    Drivers/CMSIS/Device/ST/STM32F4xx/Include
+    Drivers/CMSIS/Include
+    USB_DEVICE/App
+    USB_DEVICE/Target
+    Middlewares/ST/STM32_USB_Device_Library/Core/Inc
+    Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc
+)
 
 add_definitions(-DDEBUG -DUSE_HAL_DRIVER -DSTM32F407xx)
 
-file(GLOB_RECURSE SOURCES "Core/*.*" "Drivers/*.*")
+file(GLOB_RECURSE SOURCES
+    "Core/*.*"
+    "Drivers/*.*"
+    "USB_DEVICE/*.*"
+    "Middlewares/ST/STM32_USB_Device_Library/Core/Src/*.*"
+    "Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Src/*.*"
+)
 
 set(LINKER_SCRIPT ${CMAKE_SOURCE_DIR}/STM32F407IGHX_FLASH.ld)
 
