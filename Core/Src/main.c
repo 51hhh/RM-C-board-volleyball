@@ -31,6 +31,7 @@
 #include "usb_device.h"
 #include "../application/remote_control.h"
 #include "../application/rc_forward.h"
+#include "../application/led_indicator.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -50,9 +51,7 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
-
 /* USER CODE BEGIN PV */
-static uint32_t last_frame = 0U;
 
 /* USER CODE END PV */
 
@@ -104,6 +103,9 @@ int main(void)
   MX_TIM10_Init();
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
+    led_init();
+    led_set_init();
+    led_set_running();
     remote_control_init();
     rc_forward_init();
 
@@ -113,12 +115,8 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-      uint32_t now = remote_control_get_frame_count();
-      if (now != last_frame)
-      {
-          rc_forward_poll();
-          last_frame = now;
-      }
+      rc_forward_poll();
+      led_update(HAL_GetTick());
 
     /* USER CODE END WHILE */
 

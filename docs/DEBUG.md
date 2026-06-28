@@ -26,6 +26,12 @@ lsusb | grep -E "stlink|0d28:0204|mbed"
 openocd -f config/daplink.cfg -c "init; targets; exit"
 ```
 
+检查目标板 CDC（当前固件描述符：VID:PID=0483:5760）：
+```bash
+lsusb | grep -i "0483:5760\|stm32"
+lsusb -d 0483:5760 -v | head -n 40
+```
+
 ## GDB 调试
 
 ### 基本调试流程

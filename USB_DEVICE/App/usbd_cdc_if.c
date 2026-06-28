@@ -20,6 +20,11 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include "usbd_cdc_if.h"
+#ifdef __cplusplus
+extern "C" void rc_forward_notify_usb_tx_complete(void);
+#else
+void rc_forward_notify_usb_tx_complete(void);
+#endif
 
 /* USER CODE BEGIN INCLUDE */
 
@@ -311,6 +316,7 @@ static int8_t CDC_TransmitCplt_FS(uint8_t *Buf, uint32_t *Len, uint8_t epnum)
   UNUSED(Buf);
   UNUSED(Len);
   UNUSED(epnum);
+  rc_forward_notify_usb_tx_complete();
   /* USER CODE END 13 */
   return result;
 }
