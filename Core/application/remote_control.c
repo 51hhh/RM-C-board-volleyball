@@ -20,6 +20,7 @@
 #include "remote_control.h"
 
 #include "main.h"
+#include <string.h>
 
 
 extern UART_HandleTypeDef huart3;
@@ -75,6 +76,24 @@ void remote_control_init(void)
 const RC_ctrl_t *get_remote_control_point(void)
 {
     return &rc_ctrl;
+}
+
+uint32_t remote_control_copy(RC_ctrl_t *out)
+{
+    uint32_t frame_count = 0U;
+    uint32_t primask = 0U;
+
+    if (out == NULL) {
+        return 0U;
+    }
+
+    primask = __get_PRIMASK();
+    __disable_irq();
+    memcpy(out, &rc_ctrl, sizeof(*out));
+    frame_count = s_frame_count;
+    __set_PRIMASK(primask);
+
+    return frame_count;
 }
 
 

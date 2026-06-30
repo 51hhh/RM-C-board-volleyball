@@ -104,6 +104,9 @@ extern const RC_ctrl_t *get_remote_control_point(void);
 
 void remote_control_uart3_handler(void);
 
+/* 原子复制最近一次解码结果，避免主循环读到中断更新中的半帧。 */
+uint32_t remote_control_copy(RC_ctrl_t *out);
+
 /* 返回已解码的遥控帧序号；主循环可通过该计数判断是否有新数据到达。 */
 uint32_t remote_control_get_frame_count(void);
 #endif

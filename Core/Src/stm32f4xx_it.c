@@ -55,7 +55,7 @@
 
 /* ============================================================================
  * 故障诊断：捕获 SCB 故障状态寄存器 + 异常压栈帧，取代原裸 while(1)。
- * 调试器在线则断点停下，否则保持停机(不跑飞)。出错点看 g_fault_info.pc。
+ * 调试器在线则断点停下，否则自动复位，避免脱机运行时永久卡死。
  *   - 开启硬 FPU 后，FPU 惰性压栈相关故障会体现在 CFSR 的 MLSPERR/LSPERR/
  *     MSTKERR/MUNSTKERR 位，可借此区分是否 FPU 上下文压栈出错。
  * 由各 Fault_Handler 经 asm 取栈帧指针(MSP/PSP)与 EXC_RETURN 后跳入。
@@ -88,7 +88,9 @@ void Fault_Capture(uint32_t *frame, uint32_t exc_return)
     if (CoreDebug->DHCSR & CoreDebug_DHCSR_C_DEBUGEN_Msk) {
         __BKPT(0);                 /* 调试器在线：断下，便于现场查 g_fault_info */
     }
-    while (1) { }                  /* 否则停机，等待看门狗/复位 */
+    __DSB();
+    NVIC_SystemReset();            /* 脱机运行：复位并重新枚举 USB */
+    while (1) { }
 }
 
 /* 故障入口：取活动栈指针(EXC_RETURN bit2 选 MSP/PSP)+ LR，尾跳到 C 捕获。

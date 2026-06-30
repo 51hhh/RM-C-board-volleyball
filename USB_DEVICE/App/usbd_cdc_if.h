@@ -109,6 +109,11 @@ extern USBD_CDC_ItfTypeDef USBD_Interface_fops_FS;
 uint8_t CDC_Transmit_FS(uint8_t* Buf, uint16_t Len);
 
 /* USER CODE BEGIN EXPORTED_FUNCTIONS */
+uint8_t CDC_IsConfigured_FS(void);
+uint8_t CDC_IsHostOpen_FS(void);
+uint8_t CDC_IsTxReady_FS(void);
+uint16_t CDC_GetControlLineState_FS(void);
+void CDC_NotifyUsbBusReset_FS(void);
 
 /* USER CODE END EXPORTED_FUNCTIONS */
 

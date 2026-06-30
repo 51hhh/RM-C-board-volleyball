@@ -80,6 +80,9 @@ static uint8_t rc_forward_send_impl(const rc_forward_frame_t *frame)
     if (frame == NULL) {
         return USBD_FAIL;
     }
+    if (CDC_IsTxReady_FS() == 0U) {
+        return USBD_BUSY;
+    }
     result = CDC_Transmit_FS((uint8_t *)frame, RC_FORWARD_FRAME_LEN);
     if (result == USBD_OK) {
         /* USB 正在发送，等待完成回调清 BUSY */
@@ -115,6 +118,15 @@ void rc_forward_notify_usb_tx_complete(void)
 #endif
 }
 
+void rc_forward_notify_usb_unavailable(void)
+{
+#if USE_USB_FORWARD
+    rc_forward_set_cdc_busy(0U);
+#else
+    s_cdc_busy = 0U;
+#endif
+}
+
 void rc_forward_init(void)
 {
     /* 以当前 DBUS 帧计数初始化，避免上电重复转发上一拍 */
@@ -131,38 +143,43 @@ void rc_forward_init(void)
 
 void rc_forward_poll(void)
 {
-    const RC_ctrl_t *rc = NULL;
-    uint32_t current_frame = remote_control_get_frame_count();
+    RC_ctrl_t rc_snapshot;
+    uint32_t current_frame = 0U;
     uint8_t send_result = USBD_BUSY;
-    const uint8_t cdc_busy = rc_forward_is_cdc_busy(HAL_GetTick());
+    const uint32_t now_tick = HAL_GetTick();
+    uint8_t cdc_busy = rc_forward_is_cdc_busy(now_tick);
 
+    current_frame = remote_control_copy(&rc_snapshot);
     if (current_frame != s_last_remote_frame) {
-        rc = get_remote_control_point();
-        if (rc != NULL) {
-            rc_forward_frame_t frame = {0};
-            /* 构建定长二进制帧：避开文本解析歧义，便于上位机 CRC 校验 */
-            frame.magic = RC_FORWARD_MAGIC;
-            frame.version = RC_FORWARD_VERSION;
-            frame.payload_len = RC_FORWARD_FRAME_LEN;
-            frame.seq = s_seq++;
-            frame.tick_ms = HAL_GetTick();
+        rc_forward_frame_t frame = {0};
+        /* 构建定长二进制帧：避开文本解析歧义，便于上位机 CRC 校验 */
+        frame.magic = RC_FORWARD_MAGIC;
+        frame.version = RC_FORWARD_VERSION;
+        frame.payload_len = RC_FORWARD_FRAME_LEN;
+        frame.seq = s_seq++;
+        frame.tick_ms = now_tick;
 
-            frame.lx = rc->rc.ch[2]; /* 左摇杆 X 对应 ch2 */
-            frame.ly = rc->rc.ch[3]; /* 左摇杆 Y 对应 ch3 */
-            frame.rx = rc->rc.ch[0]; /* 右摇杆 X 对应 ch0 */
-            frame.ry = rc->rc.ch[1]; /* 右摇杆 Y 对应 ch1 */
-            frame.sw_left = (uint8_t)rc->rc.s[1];
-            frame.sw_right = (uint8_t)rc->rc.s[0];
-            frame.reserved = 0u;
+        frame.lx = rc_snapshot.rc.ch[2]; /* 左摇杆 X 对应 ch2 */
+        frame.ly = rc_snapshot.rc.ch[3]; /* 左摇杆 Y 对应 ch3 */
+        frame.rx = rc_snapshot.rc.ch[0]; /* 右摇杆 X 对应 ch0 */
+        frame.ry = rc_snapshot.rc.ch[1]; /* 右摇杆 Y 对应 ch1 */
+        frame.sw_left = (uint8_t)rc_snapshot.rc.s[1];
+        frame.sw_right = (uint8_t)rc_snapshot.rc.s[0];
+        frame.reserved = 0u;
 
-            frame.crc16 = crc16_modbus((const uint8_t *)&frame, (uint16_t)(RC_FORWARD_FRAME_LEN - sizeof(frame.crc16)));
+        frame.crc16 = crc16_modbus((const uint8_t *)&frame, (uint16_t)(RC_FORWARD_FRAME_LEN - sizeof(frame.crc16)));
 
-            /* 有新遥控帧到达即更新待发缓存：USB 忙时保留最新一帧 */
-            s_pending_frame = frame;
-            s_pending = 1U;
-        }
+        /* 有新遥控帧到达即更新待发缓存：USB 忙时保留最新一帧 */
+        s_pending_frame = frame;
+        s_pending = 1U;
         s_last_remote_frame = current_frame;
     }
+
+    if (CDC_IsHostOpen_FS() == 0U) {
+        rc_forward_set_cdc_busy(0U);
+        return;
+    }
+    cdc_busy = rc_forward_is_cdc_busy(now_tick);
 
     /* 空闲且有待发数据才发送一次；否则不重复发送历史帧。 */
     if (s_pending && !cdc_busy) {

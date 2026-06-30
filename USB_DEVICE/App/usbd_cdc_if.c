@@ -21,9 +21,12 @@
 /* Includes ------------------------------------------------------------------*/
 #include "usbd_cdc_if.h"
 #ifdef __cplusplus
-extern "C" void rc_forward_notify_usb_tx_complete(void);
-#else
+extern "C" {
+#endif
 void rc_forward_notify_usb_tx_complete(void);
+void rc_forward_notify_usb_unavailable(void);
+#ifdef __cplusplus
+}
 #endif
 
 /* USER CODE BEGIN INCLUDE */
@@ -99,6 +102,7 @@ uint8_t UserRxBufferFS[APP_RX_DATA_SIZE];
 uint8_t UserTxBufferFS[APP_TX_DATA_SIZE];
 
 /* USER CODE BEGIN PRIVATE_VARIABLES */
+static volatile uint16_t s_cdc_control_line_state = 0U;
 
 /* USER CODE END PRIVATE_VARIABLES */
 
@@ -171,6 +175,7 @@ static int8_t CDC_Init_FS(void)
 static int8_t CDC_DeInit_FS(void)
 {
   /* USER CODE BEGIN 4 */
+  CDC_NotifyUsbBusReset_FS();
   return (USBD_OK);
   /* USER CODE END 4 */
 }
@@ -233,6 +238,9 @@ static int8_t CDC_Control_FS(uint8_t cmd, uint8_t* pbuf, uint16_t length)
     break;
 
     case CDC_SET_CONTROL_LINE_STATE:
+      if (pbuf != NULL) {
+        s_cdc_control_line_state = ((USBD_SetupReqTypedef *)pbuf)->wValue;
+      }
 
     break;
 
@@ -287,12 +295,32 @@ uint8_t CDC_Transmit_FS(uint8_t* Buf, uint16_t Len)
 {
   uint8_t result = USBD_OK;
   /* USER CODE BEGIN 7 */
-  USBD_CDC_HandleTypeDef *hcdc = (USBD_CDC_HandleTypeDef*)hUsbDeviceFS.pClassData;
-  if (hcdc->TxState != 0){
+  USBD_CDC_HandleTypeDef *hcdc = NULL;
+  uint32_t primask = 0U;
+
+  if ((Buf == NULL) || (Len == 0U)) {
+    return USBD_FAIL;
+  }
+
+  primask = __get_PRIMASK();
+  __disable_irq();
+
+  hcdc = (USBD_CDC_HandleTypeDef*)hUsbDeviceFS.pClassData;
+  if ((CDC_IsHostOpen_FS() == 0U) || (hcdc == NULL)) {
+    __set_PRIMASK(primask);
     return USBD_BUSY;
   }
-  USBD_CDC_SetTxBuffer(&hUsbDeviceFS, Buf, Len);
+  if (hcdc->TxState != 0){
+    __set_PRIMASK(primask);
+    return USBD_BUSY;
+  }
+  result = USBD_CDC_SetTxBuffer(&hUsbDeviceFS, Buf, Len);
+  if (result != USBD_OK) {
+    __set_PRIMASK(primask);
+    return result;
+  }
   result = USBD_CDC_TransmitPacket(&hUsbDeviceFS);
+  __set_PRIMASK(primask);
   /* USER CODE END 7 */
   return result;
 }
@@ -322,6 +350,36 @@ static int8_t CDC_TransmitCplt_FS(uint8_t *Buf, uint32_t *Len, uint8_t epnum)
 }
 
 /* USER CODE BEGIN PRIVATE_FUNCTIONS_IMPLEMENTATION */
+uint8_t CDC_IsConfigured_FS(void)
+{
+  return (hUsbDeviceFS.dev_state == USBD_STATE_CONFIGURED) ? 1U : 0U;
+}
+
+uint16_t CDC_GetControlLineState_FS(void)
+{
+  return s_cdc_control_line_state;
+}
+
+uint8_t CDC_IsHostOpen_FS(void)
+{
+  return (CDC_IsConfigured_FS() && ((s_cdc_control_line_state & 0x0001U) != 0U)) ? 1U : 0U;
+}
+
+uint8_t CDC_IsTxReady_FS(void)
+{
+  USBD_CDC_HandleTypeDef *hcdc = (USBD_CDC_HandleTypeDef*)hUsbDeviceFS.pClassData;
+
+  if ((CDC_IsHostOpen_FS() == 0U) || (hcdc == NULL)) {
+    return 0U;
+  }
+  return (hcdc->TxState == 0U) ? 1U : 0U;
+}
+
+void CDC_NotifyUsbBusReset_FS(void)
+{
+  s_cdc_control_line_state = 0U;
+  rc_forward_notify_usb_unavailable();
+}
 
 /* USER CODE END PRIVATE_FUNCTIONS_IMPLEMENTATION */
 
