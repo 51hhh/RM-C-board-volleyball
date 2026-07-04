@@ -208,10 +208,15 @@ static void imu_kalman_update(void)
 // 遥测发送（频率由 robot_control_tick 分频控制，已移出控制热路径）
 static void telemetry_update(void)
 {
-    const motor_measure_t *arm  = get_can2_motor_measure_point(0); // 0x201 击球臂
-    const motor_measure_t *toss = get_can2_motor_measure_point(2); // 0x203 抛球蓄力
-    snprintf(telemetry_buffer, sizeof(telemetry_buffer), "%f,%d,%f,%d\r\n",
-             arm->real_angle, arm->speed_rpm, toss->real_angle, toss->speed_rpm);
+    striker_debug_t striker;
+    striker_get_debug(&striker);
+    snprintf(telemetry_buffer, sizeof(telemetry_buffer),
+             "STR,%d,%.2f,%.2f,%ld,%.2f,%.2f,%ld,%d,%d,%u,%u\r\n",
+             striker.mode,
+             striker.arm_pos, striker.arm_target, (long)striker.arm_turns,
+             striker.toss_pos, striker.toss_target, (long)striker.toss_turns,
+             striker.arm_current, striker.toss_current,
+             striker.magnet_on, striker.serve_current_on);
     uart_queue_send(telemetry_buffer, strlen(telemetry_buffer));
 }
 

@@ -3,11 +3,13 @@
   * @file    striker.c
   * @brief   发球击球机构层实现 (CAN2 三个 M3508)
   *
-  *   双环级联 = 复用 pid.c 的 motor_pid_t/pid_calc：角度外环输出作速度内环设定，
-  *   速度内环反馈取"本拍多圈位置增量"。在 1kHz 固定拍执行(速度量纲恒为 度/ms)，
-  *   修掉原击球臂工程自由循环下速度量纲漂移的问题。死区复刻原 PID_Cal_Limt。
+  *   遥控三档：
+  *     上档 IDLE    : 臂/电磁铁高度电机回 0 等待，电磁铁吸合。
+  *     中档 PREPARE : 臂按规定方向慢速转到蓄力位，高度电机到蓄力位，电磁铁持续吸合。
+  *     下档 SERVE   : 电磁铁释放，臂开环给定击打电流；经过击球检测位后断流，靠重力回落。
   *
-  *   PID 参数与目标位沿用原工程作起点，1kHz 下需上板重新整定。
+  *   两个位置轴都使用多圈累加坐标(度)，避免 3508 单圈编码器跨圈后只看到很小角差。
+  *   状态二/三的运动目标在进入状态时锁存为规定方向上的等效多圈目标，不走最短路径。
   ******************************************************************************
   */
 #include "striker.h"
@@ -19,50 +21,62 @@
 
 #include <math.h>
 
-/* ===== 电磁铁释放接口(预留) =====
- * 配好 CubeMX 引脚后，取消下面两行注释并填入实际端口/引脚即可启用：
- *   #define MAGNET_GPIO_Port  GPIOx
- *   #define MAGNET_Pin        GPIO_PIN_x
- * 未定义时 striker_magnet_set 为空操作(不会误写引脚)。 */
-/* #define MAGNET_GPIO_Port  GPIOB */
-/* #define MAGNET_Pin        GPIO_PIN_13 */
+/* ===== 电磁铁控制：PI7，默认高电平吸合 ===== */
+#define MAGNET_GPIO_Port    GPIOI
+#define MAGNET_Pin          GPIO_PIN_7
+#define MAGNET_ACTIVE_LEVEL GPIO_PIN_SET
 
 /* CAN2 反馈索引 ARM_FB_IDX / TOSS_FB_IDX 已集中到 motor_config.h */
 
-/* ===== 目标位(度，多圈累加坐标；起点取自原工程，需整定) ===== */
-#define ARM_IDLE_POS        0.0f
-#define ARM_PREPARE_POS    -1450.0f   // 臂后摆蓄势
-#define ARM_STRIKE_POS      1200.0f   // 挥击到位
-#define TOSS_IDLE_POS       0.0f
-#define TOSS_CHARGE_POS     200.0f    // 抛球蓄力位(占位，需整定)
-#define STRIKE_DELAY_MS     165U      // 电磁铁释放后到挥击的延时(原值)
+/* ===== 标定量(度，多圈累加坐标；上板记录后回填) ===== */
+#define ARM_IDLE_POS              0.0f      // 状态一实测等待位：arm_pos=0.000
+#define ARM_PREPARE_POS        5344.583f   // 状态二实测蓄力位：arm_pos=5344.583
+#define ARM_STRIKE_CUTOFF_POS    (-1109.136f) // 状态三实测击球断流位：arm_pos=-1109.136
+#define TOSS_IDLE_POS          3883.052f    // 状态一实测等待位：toss_pos=3883.052
+#define TOSS_CHARGE_POS        (-296.543f) // 状态二实测蓄力位：toss_pos=-296.543
+
+/* ===== 规定运动方向：+1=多圈角度增大，-1=多圈角度减小 ===== */
+#define ARM_PREPARE_DIR          (+1)
+#define ARM_STRIKE_DIR           (-1)
+#define TOSS_CHARGE_DIR          (-1)
+
+/* ===== 电流/限幅 ===== */
+#define ARM_STRIKE_CURRENT       13000.0f   // 状态三开环击打电流，最大不要超过 16384
+#define RM3508_CURRENT_MAX       16384.0f
+
+/* 已经在目标附近时不强制再绕一圈，避免到位保持时被定向逻辑赶走 */
+#define DIRECTED_TARGET_DZ       50.0f
 
 /* ===== 级联死区(复刻原 PID_Cal_Limt：|err|≤dz 则该环清零，防到位抖动) ===== */
 #define ANGLE_DZ            50.0f
 #define SPEED_DZ            10.0f
 
-/* 单轴位置跟踪状态(PID 不在此，按工况由调用方选 gentle/strong) */
+/* 单轴位置跟踪状态(PID 状态单独保存，多圈坐标用于目标和过位判断) */
 typedef struct {
     float   pos_abs;     // 多圈累加位置(度)
     float   pos_last;    // 上一拍 pos_abs(算速度)
     float   angle_last;  // 上一拍单圈角度(度，算多圈增量)
     float   target;      // 目标位
+    int32_t turns;       // 单圈编码器跨圈次数(调试观察用)
     uint8_t inited;      // 首拍初始化
 } axis_t;
 
 static axis_t s_arm;
 static axis_t s_toss;
 
-/* 臂：常规定位(gentle) + 强力挥击(strong) 两套级联 PID；抛球一套 */
+/* 臂/电磁铁高度：位置等待用级联 PID；状态三击打臂改为开环电流。 */
 static motor_pid_t arm_angle_pid,  arm_speed_pid;
-static motor_pid_t arm_strike_angle_pid, arm_strike_speed_pid;
 static motor_pid_t toss_angle_pid, toss_speed_pid;
 
-static int      s_mode = STRIKER_IDLE;  // 发球状态
-static uint8_t  s_arm_strong = 0;       // 臂是否用强力 PID(挥击阶段)
-static uint32_t s_serve_stamp = 0;      // 进入发球的时刻(电磁铁释放计时)
+static int      s_mode = STRIKER_IDLE;      // 当前发球状态
+static uint8_t  s_mode_entry = 1;           // 下一拍执行状态进入动作
+static uint8_t  s_serve_current_on = 0;     // 状态三是否仍给击打电流
+static uint8_t  s_magnet_on = 0;
+static float    s_arm_strike_cutoff = ARM_STRIKE_CUTOFF_POS;
+static int16_t  s_arm_current_cmd = 0;
+static int16_t  s_toss_current_cmd = 0;
 
-/* 多圈角度累加：单圈 0~360 回绕取 |Δ|≤180 的真实增量(等价原 Motor_Angle_Cal) */
+/* 多圈角度累加：单圈 0~360 回绕取 |Δ|≤180 的真实增量(等价原 Motor_Angle_Cal)。 */
 static void axis_track_angle(axis_t *ax, float real_angle)
 {
     if (!ax->inited) {
@@ -72,14 +86,84 @@ static void axis_track_angle(axis_t *ax, float real_angle)
         return;
     }
     float d = real_angle - ax->angle_last;
-    if (d > 180.0f)       d -= 360.0f;
-    else if (d < -180.0f) d += 360.0f;
+    if (d > 180.0f) {
+        d -= 360.0f;
+        ax->turns--;
+    } else if (d < -180.0f) {
+        d += 360.0f;
+        ax->turns++;
+    }
     ax->pos_abs   += d;
     ax->angle_last = real_angle;
 }
 
-/* 双环级联一步：角度外环 -> 速度内环，各带死区。返回电流设定。
- * apid/spid 由调用方选择(臂可切常规/强力)。 */
+static float clampf(float value, float min, float max)
+{
+    if (value < min) {
+        return min;
+    }
+    if (value > max) {
+        return max;
+    }
+    return value;
+}
+
+static int16_t clamp_current(float current)
+{
+    current = clampf(current, -RM3508_CURRENT_MAX, RM3508_CURRENT_MAX);
+    return (int16_t)current;
+}
+
+static void pid_clear(motor_pid_t *pid)
+{
+    pid->err[0] = 0.0f;
+    pid->err[1] = 0.0f;
+    pid->p_out  = 0.0f;
+    pid->i_out  = 0.0f;
+    pid->d_out  = 0.0f;
+    pid->output = 0.0f;
+}
+
+static void clear_axis_pid(void)
+{
+    pid_clear(&arm_angle_pid);
+    pid_clear(&arm_speed_pid);
+    pid_clear(&toss_angle_pid);
+    pid_clear(&toss_speed_pid);
+}
+
+/* 把 base_pos 换算成从 current_pos 出发、沿 dir 方向会遇到的等效多圈目标。
+ * 这一步只在进入状态时锁存，避免目标随当前位置滚动导致永远追不到。 */
+static float directed_target(float current_pos, float base_pos, int dir)
+{
+    float target = base_pos;
+
+    if (fabsf(target - current_pos) <= DIRECTED_TARGET_DZ) {
+        return target;
+    }
+
+    if (dir > 0) {
+        while (target < current_pos) {
+            target += 360.0f;
+        }
+    } else if (dir < 0) {
+        while (target > current_pos) {
+            target -= 360.0f;
+        }
+    }
+
+    return target;
+}
+
+static uint8_t axis_passed(float pos, float threshold, int dir)
+{
+    if (dir >= 0) {
+        return pos >= threshold;
+    }
+    return pos <= threshold;
+}
+
+/* 双环级联一步：角度外环 -> 速度内环，各带死区。返回电流设定。 */
 static float cascade_step(axis_t *ax, float target,
                           motor_pid_t *apid, motor_pid_t *spid,
                           float a_dz, float s_dz)
@@ -99,41 +183,56 @@ static float cascade_step(axis_t *ax, float target,
     return out_s;
 }
 
-/* 发球状态机：设定两轴目标位 + 电磁铁 + 臂强力切换。
- * 结构改自原 type0/1/2：机构由"电机释放"改为"蓄力 + 电磁铁释放"。 */
-static void serve_state_machine(uint32_t now)
+static void enter_mode(void)
 {
     switch (s_mode) {
     case STRIKER_PREPARE:
-        s_arm.target  = ARM_PREPARE_POS;   // 臂后摆蓄势
-        s_toss.target = TOSS_CHARGE_POS;   // 抛球电机移到蓄力位并保持
-        striker_magnet_set(true);          // 电磁铁吸合，锁住蓄力
-        s_arm_strong  = 0;
-        s_serve_stamp = 0;
+        s_arm.target  = directed_target(s_arm.pos_abs,  ARM_PREPARE_POS, ARM_PREPARE_DIR);
+        s_toss.target = directed_target(s_toss.pos_abs, TOSS_CHARGE_POS, TOSS_CHARGE_DIR);
+        s_serve_current_on = 0;
         break;
 
     case STRIKER_SERVE:
-        if (s_serve_stamp == 0) {          // 进入发球瞬间
-            s_serve_stamp = now;
-            striker_magnet_set(false);     // 电磁铁释放 -> 放能/抛球
-        }
-        s_toss.target = TOSS_CHARGE_POS;   // 抛球保持(放能由电磁铁完成)
-        if (now - s_serve_stamp >= STRIKE_DELAY_MS) {
-            s_arm.target = ARM_STRIKE_POS;  // 延时后强力挥击
-            s_arm_strong = 1;
-        } else {
-            s_arm.target = ARM_PREPARE_POS; // 延时窗口内保持蓄势
-            s_arm_strong = 0;
-        }
+        s_toss.target = s_toss.pos_abs;    // 高度电机不换位置，只保持进入发球瞬间的位置
+        s_arm_strike_cutoff = directed_target(s_arm.pos_abs, ARM_STRIKE_CUTOFF_POS, ARM_STRIKE_DIR);
+        s_serve_current_on = 1;
+        clear_axis_pid();                  // 切开环前清掉位置环积分
         break;
 
     case STRIKER_IDLE:
     default:
         s_arm.target  = ARM_IDLE_POS;
         s_toss.target = TOSS_IDLE_POS;
+        s_serve_current_on = 0;
+        break;
+    }
+
+    s_mode_entry = 0;
+}
+
+/* 发球状态机：只负责目标/磁铁/开环阶段，不直接下发 CAN。 */
+static void serve_state_machine(void)
+{
+    if (s_mode_entry) {
+        enter_mode();
+    }
+
+    switch (s_mode) {
+    case STRIKER_PREPARE:
+        striker_magnet_set(true);
+        break;
+
+    case STRIKER_SERVE:
         striker_magnet_set(false);
-        s_arm_strong  = 0;
-        s_serve_stamp = 0;
+        if (s_serve_current_on &&
+            axis_passed(s_arm.pos_abs, s_arm_strike_cutoff, ARM_STRIKE_DIR)) {
+            s_serve_current_on = 0;
+        }
+        break;
+
+    case STRIKER_IDLE:
+    default:
+        striker_magnet_set(true);
         break;
     }
 }
@@ -143,47 +242,92 @@ void striker_init(void)
     // 击球臂：常规定位(温和)
     pid_init(&arm_angle_pid, ARM_ANG_KP, ARM_ANG_KI, ARM_ANG_KD, ARM_ANG_IMAX, ARM_ANG_OUT);
     pid_init(&arm_speed_pid, ARM_SPD_KP, ARM_SPD_KI, ARM_SPD_KD, ARM_SPD_IMAX, ARM_SPD_OUT);
-    // 击球臂：强力挥击
-    pid_init(&arm_strike_angle_pid, ARM_STK_ANG_KP, ARM_STK_ANG_KI, ARM_STK_ANG_KD, ARM_STK_ANG_IMAX, ARM_STK_ANG_OUT);
-    pid_init(&arm_strike_speed_pid, ARM_STK_SPD_KP, ARM_STK_SPD_KI, ARM_STK_SPD_KD, ARM_STK_SPD_IMAX, ARM_STK_SPD_OUT);
-    // 抛球蓄力
+    // 电磁铁高度
     pid_init(&toss_angle_pid, TOSS_ANG_KP, TOSS_ANG_KI, TOSS_ANG_KD, TOSS_ANG_IMAX, TOSS_ANG_OUT);
     pid_init(&toss_speed_pid, TOSS_SPD_KP, TOSS_SPD_KI, TOSS_SPD_KD, TOSS_SPD_IMAX, TOSS_SPD_OUT);
 
     s_mode = STRIKER_IDLE;
+    s_mode_entry = 1;
+    s_arm.target = ARM_IDLE_POS;
+    s_toss.target = TOSS_IDLE_POS;
+    striker_magnet_set(true);
 }
 
 void striker_update(uint32_t now_ms)
 {
+    (void)now_ms;
+
     // 1) 读两轴多圈角度(臂读 0x201，抛球读 0x203)
     axis_track_angle(&s_arm,  get_can2_motor_measure_point(ARM_FB_IDX)->real_angle);
     axis_track_angle(&s_toss, get_can2_motor_measure_point(TOSS_FB_IDX)->real_angle);
 
-    // 2) 发球状态机：设定目标 + 电磁铁 + 强力切换
-    serve_state_machine(now_ms);
+    // 2) 发球状态机：设定/锁存目标 + 电磁铁 + 开环阶段
+    serve_state_machine();
 
-    // 3) 双环级联得电流(臂在挥击阶段切强力 PID)
-    motor_pid_t *arm_a = s_arm_strong ? &arm_strike_angle_pid : &arm_angle_pid;
-    motor_pid_t *arm_s = s_arm_strong ? &arm_strike_speed_pid : &arm_speed_pid;
-    float i_arm  = cascade_step(&s_arm,  s_arm.target,  arm_a, arm_s, ANGLE_DZ, SPEED_DZ);
+    // 3) 得电流：状态三臂开环击打，其余状态臂/高度电机均位置保持
+    float i_arm = 0.0f;
+    if (s_mode == STRIKER_SERVE) {
+        i_arm = s_serve_current_on ? (ARM_STRIKE_CURRENT * (float)ARM_STRIKE_DIR) : 0.0f;
+        s_arm.pos_last = s_arm.pos_abs;     // 开环期间仍刷新速度基准，避免回位置环时速度突变
+    } else {
+        i_arm = cascade_step(&s_arm, s_arm.target, &arm_angle_pid, &arm_speed_pid, ANGLE_DZ, SPEED_DZ);
+    }
+
     float i_toss = cascade_step(&s_toss, s_toss.target, &toss_angle_pid, &toss_speed_pid, ANGLE_DZ, SPEED_DZ);
 
+    s_arm_current_cmd  = clamp_current(i_arm);
+    s_toss_current_cmd = clamp_current(i_toss);
+
+#ifdef STRIKER_CALIB_NO_DRIVE
+    s_arm_current_cmd = 0;
+    s_toss_current_cmd = 0;
+#endif
+
     // 4) CAN2 下发：击球臂双电机反相(0x201 +I / 0x202 -I)，抛球(0x203)
-    CAN_cmd_can2((int16_t)i_arm, (int16_t)(-i_arm), (int16_t)i_toss);
+    CAN_cmd_can2(s_arm_current_cmd, (int16_t)(-s_arm_current_cmd), s_toss_current_cmd);
 }
 
 void striker_set_mode(int mode)
 {
     if (mode == STRIKER_IDLE || mode == STRIKER_PREPARE || mode == STRIKER_SERVE) {
-        s_mode = mode;
+        if (s_mode != mode) {
+            s_mode = mode;
+            s_mode_entry = 1;
+            clear_axis_pid();
+        }
     }
 }
 
 void striker_magnet_set(bool on)
 {
 #ifdef MAGNET_GPIO_Port
-    HAL_GPIO_WritePin(MAGNET_GPIO_Port, MAGNET_Pin, on ? GPIO_PIN_SET : GPIO_PIN_RESET);
+    s_magnet_on = on ? 1U : 0U;
+    GPIO_PinState state = on ? MAGNET_ACTIVE_LEVEL :
+                          ((MAGNET_ACTIVE_LEVEL == GPIO_PIN_SET) ? GPIO_PIN_RESET : GPIO_PIN_SET);
+    HAL_GPIO_WritePin(MAGNET_GPIO_Port, MAGNET_Pin, state);
 #else
     (void)on;   // 引脚未配置：预留接口，待 CubeMX 配好后定义 MAGNET_GPIO_Port/Pin 启用
 #endif
+}
+
+void striker_get_debug(striker_debug_t *debug)
+{
+    if (debug == NULL) {
+        return;
+    }
+
+    debug->mode = s_mode;
+    debug->arm_pos = s_arm.pos_abs;
+    debug->arm_target = s_arm.target;
+    debug->arm_single_angle = s_arm.angle_last;
+    debug->arm_turns = s_arm.turns;
+    debug->arm_strike_cutoff = s_arm_strike_cutoff;
+    debug->arm_current = s_arm_current_cmd;
+    debug->toss_pos = s_toss.pos_abs;
+    debug->toss_target = s_toss.target;
+    debug->toss_single_angle = s_toss.angle_last;
+    debug->toss_turns = s_toss.turns;
+    debug->toss_current = s_toss_current_cmd;
+    debug->magnet_on = s_magnet_on;
+    debug->serve_current_on = s_serve_current_on;
 }
