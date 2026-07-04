@@ -21,10 +21,12 @@
 
 #include <math.h>
 
-/* ===== 电磁铁控制：PI7，默认高电平吸合 ===== */
+/* ===== 电磁铁控制：PI7 =====
+ * 吸合时主动驱动，释放时切高阻，避免驱动板输入极性/上拉下拉不确定时被 MCU 强驱。 */
 #define MAGNET_GPIO_Port    GPIOI
 #define MAGNET_Pin          GPIO_PIN_7
 #define MAGNET_ACTIVE_LEVEL GPIO_PIN_SET
+#define MAGNET_RELEASE_HIZ  0U
 
 /* CAN2 反馈索引 ARM_FB_IDX / TOSS_FB_IDX 已集中到 motor_config.h */
 
@@ -32,8 +34,8 @@
 #define ARM_IDLE_POS              0.0f      // 状态一实测等待位：arm_pos=0.000
 #define ARM_PREPARE_POS        5344.583f   // 状态二实测蓄力位：arm_pos=5344.583
 #define ARM_STRIKE_CUTOFF_POS    (-1109.136f) // 状态三实测击球断流位：arm_pos=-1109.136
-#define TOSS_IDLE_POS          3883.052f    // 状态一实测等待位：toss_pos=3883.052
-#define TOSS_CHARGE_POS        (-296.543f) // 状态二实测蓄力位：toss_pos=-296.543
+#define TOSS_IDLE_POS             0.0f      // 状态一作为电磁铁高度电机相对零点
+#define TOSS_CHARGE_POS        (-4179.595f) // 状态二相对状态一位移：-296.543 - 3883.052
 
 /* ===== 规定运动方向：+1=多圈角度增大，-1=多圈角度减小 ===== */
 #define ARM_PREPARE_DIR          (+1)
@@ -43,6 +45,14 @@
 /* ===== 电流/限幅 ===== */
 #define ARM_STRIKE_CURRENT       13000.0f   // 状态三开环击打电流，最大不要超过 16384
 #define RM3508_CURRENT_MAX       16384.0f
+#define ARM_PREPARE_SPEED_LIMIT  300.0f     // 状态二击球臂蓄力速度上限；原外环上限为 1000
+#define ARM_PREPARE_ANGLE_DZ     0.0f       // 蓄力保持不能用大死区，否则到位附近无保持力矩
+#define ARM_PREPARE_SPEED_DZ     0.0f
+
+/* 上电后先给电磁铁高度电机一个小电流，把机构推回机械 0 点，再把软件坐标清零。
+ * 当前只处理高度电机；击球臂不自动推零，避免意外动作。 */
+#define TOSS_STARTUP_HOME_MS      1000U
+#define TOSS_STARTUP_HOME_CURRENT 900.0f
 
 /* 已经在目标附近时不强制再绕一圈，避免到位保持时被定向逻辑赶走 */
 #define DIRECTED_TARGET_DZ       50.0f
@@ -70,8 +80,15 @@ static motor_pid_t toss_angle_pid, toss_speed_pid;
 
 static int      s_mode = STRIKER_IDLE;      // 当前发球状态
 static uint8_t  s_mode_entry = 1;           // 下一拍执行状态进入动作
+static uint8_t  s_idle_hold_current = 0;    // 逆向切回状态一时保持当前位置，不主动回零
 static uint8_t  s_serve_current_on = 0;     // 状态三是否仍给击打电流
 static uint8_t  s_magnet_on = 0;
+static uint8_t  s_magnet_pin_output = 0xFFU;
+static uint8_t  s_magnet_pin_cmd = 0;
+static uint8_t  s_magnet_pin_level = 0;
+static uint8_t  s_startup_home_started = 0;
+static uint8_t  s_startup_home_done = 0;
+static uint32_t s_startup_home_stamp = 0;
 static float    s_arm_strike_cutoff = ARM_STRIKE_CUTOFF_POS;
 static int16_t  s_arm_current_cmd = 0;
 static int16_t  s_toss_current_cmd = 0;
@@ -163,15 +180,26 @@ static uint8_t axis_passed(float pos, float threshold, int dir)
     return pos <= threshold;
 }
 
+static void axis_zero(axis_t *ax)
+{
+    ax->pos_abs = 0.0f;
+    ax->pos_last = 0.0f;
+    ax->turns = 0;
+}
+
 /* 双环级联一步：角度外环 -> 速度内环，各带死区。返回电流设定。 */
 static float cascade_step(axis_t *ax, float target,
                           motor_pid_t *apid, motor_pid_t *spid,
-                          float a_dz, float s_dz)
+                          float a_dz, float s_dz,
+                          float speed_limit)
 {
     // 角度外环：误差 = 目标 - 多圈位置
     float a_err = target - ax->pos_abs;
     float out_a = pid_calc(apid, target, ax->pos_abs);
     if (fabsf(a_err) <= a_dz) { out_a = 0.0f; apid->i_out = 0.0f; }   // 死区
+    if (speed_limit > 0.0f) {
+        out_a = clampf(out_a, -speed_limit, speed_limit);
+    }
 
     // 速度内环：反馈 = 本拍位置增量(度/拍)，设定 = 角度环输出
     float speed = ax->pos_abs - ax->pos_last;
@@ -187,23 +215,33 @@ static void enter_mode(void)
 {
     switch (s_mode) {
     case STRIKER_PREPARE:
+        s_idle_hold_current = 0;
         s_arm.target  = directed_target(s_arm.pos_abs,  ARM_PREPARE_POS, ARM_PREPARE_DIR);
         s_toss.target = directed_target(s_toss.pos_abs, TOSS_CHARGE_POS, TOSS_CHARGE_DIR);
         s_serve_current_on = 0;
+        striker_magnet_set(true);
         break;
 
     case STRIKER_SERVE:
+        s_idle_hold_current = 0;
         s_toss.target = s_toss.pos_abs;    // 高度电机不换位置，只保持进入发球瞬间的位置
         s_arm_strike_cutoff = directed_target(s_arm.pos_abs, ARM_STRIKE_CUTOFF_POS, ARM_STRIKE_DIR);
         s_serve_current_on = 1;
+        striker_magnet_set(false);
         clear_axis_pid();                  // 切开环前清掉位置环积分
         break;
 
     case STRIKER_IDLE:
     default:
-        s_arm.target  = ARM_IDLE_POS;
-        s_toss.target = TOSS_IDLE_POS;
+        if (s_idle_hold_current) {
+            s_arm.target = s_arm.pos_abs;
+            s_toss.target = s_toss.pos_abs;
+        } else {
+            s_arm.target  = ARM_IDLE_POS;
+            s_toss.target = TOSS_IDLE_POS;
+        }
         s_serve_current_on = 0;
+        striker_magnet_set(true);
         break;
     }
 
@@ -248,8 +286,12 @@ void striker_init(void)
 
     s_mode = STRIKER_IDLE;
     s_mode_entry = 1;
+    s_idle_hold_current = 0;
     s_arm.target = ARM_IDLE_POS;
     s_toss.target = TOSS_IDLE_POS;
+    s_startup_home_started = 0;
+    s_startup_home_done = 0;
+    s_startup_home_stamp = 0;
     striker_magnet_set(true);
 }
 
@@ -261,19 +303,46 @@ void striker_update(uint32_t now_ms)
     axis_track_angle(&s_arm,  get_can2_motor_measure_point(ARM_FB_IDX)->real_angle);
     axis_track_angle(&s_toss, get_can2_motor_measure_point(TOSS_FB_IDX)->real_angle);
 
-    // 2) 发球状态机：设定/锁存目标 + 电磁铁 + 开环阶段
+    // 2) 上电高度电机机械归零：小电流推 1 秒，然后把高度多圈坐标清零
+    if (!s_startup_home_done) {
+        if (!s_startup_home_started) {
+            s_startup_home_started = 1;
+            s_startup_home_stamp = now_ms;
+        }
+
+        striker_magnet_set(true);
+        s_arm_current_cmd = 0;
+        s_toss_current_cmd = clamp_current(TOSS_STARTUP_HOME_CURRENT);
+        CAN_cmd_can2(0, 0, s_toss_current_cmd);
+
+        if (now_ms - s_startup_home_stamp >= TOSS_STARTUP_HOME_MS) {
+            axis_zero(&s_toss);
+            s_toss.target = TOSS_IDLE_POS;
+            s_startup_home_done = 1;
+            s_mode_entry = 1;
+            clear_axis_pid();
+        }
+        return;
+    }
+
+    // 3) 发球状态机：设定/锁存目标 + 电磁铁 + 开环阶段
     serve_state_machine();
 
-    // 3) 得电流：状态三臂开环击打，其余状态臂/高度电机均位置保持
+    // 4) 得电流：状态三臂开环击打，其余状态臂/高度电机均位置保持
     float i_arm = 0.0f;
     if (s_mode == STRIKER_SERVE) {
         i_arm = s_serve_current_on ? (ARM_STRIKE_CURRENT * (float)ARM_STRIKE_DIR) : 0.0f;
         s_arm.pos_last = s_arm.pos_abs;     // 开环期间仍刷新速度基准，避免回位置环时速度突变
     } else {
-        i_arm = cascade_step(&s_arm, s_arm.target, &arm_angle_pid, &arm_speed_pid, ANGLE_DZ, SPEED_DZ);
+        float arm_speed_limit = (s_mode == STRIKER_PREPARE) ? ARM_PREPARE_SPEED_LIMIT : 0.0f;
+        float arm_angle_dz = (s_mode == STRIKER_PREPARE) ? ARM_PREPARE_ANGLE_DZ : ANGLE_DZ;
+        float arm_speed_dz = (s_mode == STRIKER_PREPARE) ? ARM_PREPARE_SPEED_DZ : SPEED_DZ;
+        i_arm = cascade_step(&s_arm, s_arm.target, &arm_angle_pid, &arm_speed_pid,
+                             arm_angle_dz, arm_speed_dz, arm_speed_limit);
     }
 
-    float i_toss = cascade_step(&s_toss, s_toss.target, &toss_angle_pid, &toss_speed_pid, ANGLE_DZ, SPEED_DZ);
+    float i_toss = cascade_step(&s_toss, s_toss.target, &toss_angle_pid, &toss_speed_pid,
+                                ANGLE_DZ, SPEED_DZ, 0.0f);
 
     s_arm_current_cmd  = clamp_current(i_arm);
     s_toss_current_cmd = clamp_current(i_toss);
@@ -283,19 +352,62 @@ void striker_update(uint32_t now_ms)
     s_toss_current_cmd = 0;
 #endif
 
-    // 4) CAN2 下发：击球臂双电机反相(0x201 +I / 0x202 -I)，抛球(0x203)
+    // 5) CAN2 下发：击球臂双电机反相(0x201 +I / 0x202 -I)，抛球(0x203)
     CAN_cmd_can2(s_arm_current_cmd, (int16_t)(-s_arm_current_cmd), s_toss_current_cmd);
 }
 
 void striker_set_mode(int mode)
 {
     if (mode == STRIKER_IDLE || mode == STRIKER_PREPARE || mode == STRIKER_SERVE) {
+        /* 遥控三档从下档回上档时物理上会经过中档。
+         * 已经发球后的 SERVE -> PREPARE 视为过渡噪声，避免逆向切换时重新蓄力。 */
+        if (s_mode == STRIKER_SERVE && mode == STRIKER_PREPARE) {
+            return;
+        }
+
         if (s_mode != mode) {
+            if (mode == STRIKER_IDLE &&
+                (s_mode == STRIKER_PREPARE || s_mode == STRIKER_SERVE)) {
+                s_idle_hold_current = 1;
+            }
             s_mode = mode;
             s_mode_entry = 1;
             clear_axis_pid();
         }
     }
+}
+
+static void magnet_gpio_output(void)
+{
+#ifdef MAGNET_GPIO_Port
+    if (s_magnet_pin_output == 1U) {
+        return;
+    }
+
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+    GPIO_InitStruct.Pin = MAGNET_Pin;
+    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(MAGNET_GPIO_Port, &GPIO_InitStruct);
+    s_magnet_pin_output = 1U;
+#endif
+}
+
+static void magnet_gpio_hiz(void)
+{
+#ifdef MAGNET_GPIO_Port
+    if (s_magnet_pin_output == 0U) {
+        return;
+    }
+
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+    GPIO_InitStruct.Pin = MAGNET_Pin;
+    GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    HAL_GPIO_Init(MAGNET_GPIO_Port, &GPIO_InitStruct);
+    s_magnet_pin_output = 0U;
+#endif
 }
 
 void striker_magnet_set(bool on)
@@ -304,7 +416,19 @@ void striker_magnet_set(bool on)
     s_magnet_on = on ? 1U : 0U;
     GPIO_PinState state = on ? MAGNET_ACTIVE_LEVEL :
                           ((MAGNET_ACTIVE_LEVEL == GPIO_PIN_SET) ? GPIO_PIN_RESET : GPIO_PIN_SET);
-    HAL_GPIO_WritePin(MAGNET_GPIO_Port, MAGNET_Pin, state);
+    s_magnet_pin_cmd = (state == GPIO_PIN_SET) ? 1U : 0U;
+    if (on) {
+        magnet_gpio_output();
+        HAL_GPIO_WritePin(MAGNET_GPIO_Port, MAGNET_Pin, state);
+    } else {
+        HAL_GPIO_WritePin(MAGNET_GPIO_Port, MAGNET_Pin, state);
+#if MAGNET_RELEASE_HIZ
+        magnet_gpio_hiz();
+#else
+        magnet_gpio_output();
+#endif
+    }
+    s_magnet_pin_level = (HAL_GPIO_ReadPin(MAGNET_GPIO_Port, MAGNET_Pin) == GPIO_PIN_SET) ? 1U : 0U;
 #else
     (void)on;   // 引脚未配置：预留接口，待 CubeMX 配好后定义 MAGNET_GPIO_Port/Pin 启用
 #endif
@@ -330,4 +454,7 @@ void striker_get_debug(striker_debug_t *debug)
     debug->toss_current = s_toss_current_cmd;
     debug->magnet_on = s_magnet_on;
     debug->serve_current_on = s_serve_current_on;
+    debug->magnet_pin_output = s_magnet_pin_output;
+    debug->magnet_pin_cmd = s_magnet_pin_cmd;
+    debug->magnet_pin_level = s_magnet_pin_level;
 }

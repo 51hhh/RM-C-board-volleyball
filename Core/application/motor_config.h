@@ -30,17 +30,17 @@
 #define ARM_ID_B            0x202      /* -I 电机 */
 #define ARM_FB_ID           0x201      /* 反馈编码器所在 ID */
 /* 常规定位 - 角度环 */
-#define ARM_ANG_KP          2.0f
+#define ARM_ANG_KP          6.0f
 #define ARM_ANG_KI          0.0f
-#define ARM_ANG_KD          1.0f
+#define ARM_ANG_KD          0.0f
 #define ARM_ANG_IMAX        1000.0f
 #define ARM_ANG_OUT         1000.0f
 /* 常规定位 - 速度环 */
-#define ARM_SPD_KP          3.0f
+#define ARM_SPD_KP          15.0f
 #define ARM_SPD_KI          0.0f
-#define ARM_SPD_KD          1.0f
-#define ARM_SPD_IMAX        800.0f
-#define ARM_SPD_OUT         2500.0f
+#define ARM_SPD_KD          0.05f
+#define ARM_SPD_IMAX        4000.0f
+#define ARM_SPD_OUT         10000.0f
 /* 强力挥击 - 角度环 */
 #define ARM_STK_ANG_KP      2.0f
 #define ARM_STK_ANG_KI      0.0f

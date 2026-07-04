@@ -42,6 +42,9 @@ typedef struct {
     int16_t toss_current;
     uint8_t magnet_on;
     uint8_t serve_current_on;
+    uint8_t magnet_pin_output;    // 1=输出模式，0=高阻输入
+    uint8_t magnet_pin_cmd;       // 1=命令高电平，0=命令低电平
+    uint8_t magnet_pin_level;     // HAL 读回 PI7 实际电平
 } striker_debug_t;
 
 /* 击球臂/电磁铁高度位置环 PID 初始化 */
