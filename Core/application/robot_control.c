@@ -238,8 +238,11 @@ void robot_control_init(void)
     led_set_init();                     // 初始化态
     led_update(0);                      // 立即点亮蓝灯(此时调度器尚未启动)
 
+    // BMI088 初始化（调试期间如需跳过，编译时加 -DSKIP_BMI088）
+#ifndef SKIP_BMI088
     while (BMI088_init()) {             // BMI088 初始化(失败则阻塞重试)
     }
+#endif
 
     can_filter_init();                  // CAN 过滤器初始化
     remote_control_init();              // 遥控器初始化(USART3 DMA + 空闲中断)
