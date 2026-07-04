@@ -65,11 +65,11 @@
 #define TOSS_ANG_IMAX       1000.0f
 #define TOSS_ANG_OUT        1000.0f
 /* 速度环 */
-#define TOSS_SPD_KP         2.0f
-#define TOSS_SPD_KI         0.0f
-#define TOSS_SPD_KD         1.0f
-#define TOSS_SPD_IMAX       1000.0f
-#define TOSS_SPD_OUT        2500.0f
+#define TOSS_SPD_KP         6.0f
+#define TOSS_SPD_KI         0.02f
+#define TOSS_SPD_KD         0.3f
+#define TOSS_SPD_IMAX       2500.0f
+#define TOSS_SPD_OUT        6000.0f
 
 /* CAN2 反馈数组(get_can2_motor_measure_point)下标，由 ID 推导，集中于此 */
 #define ARM_FB_IDX          (ARM_FB_ID - 0x201)   /* = 0 */

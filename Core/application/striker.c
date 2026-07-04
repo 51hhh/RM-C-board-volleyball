@@ -35,7 +35,7 @@
 #define ARM_PREPARE_POS        5344.583f   // 状态二实测蓄力位：arm_pos=5344.583
 #define ARM_STRIKE_CUTOFF_POS    (-1109.136f) // 状态三实测击球断流位：arm_pos=-1109.136
 #define TOSS_IDLE_POS             0.0f      // 状态一作为电磁铁高度电机相对零点
-#define TOSS_CHARGE_POS        (-4179.595f) // 状态二相对状态一位移：-296.543 - 3883.052
+#define TOSS_CHARGE_POS        (-5500.595f) // 状态二相对状态一位移：-296.543 - 3883.052
 
 /* ===== 规定运动方向：+1=多圈角度增大，-1=多圈角度减小 ===== */
 #define ARM_PREPARE_DIR          (+1)
@@ -48,6 +48,9 @@
 #define ARM_PREPARE_SPEED_LIMIT  300.0f     // 状态二击球臂蓄力速度上限；原外环上限为 1000
 #define ARM_PREPARE_ANGLE_DZ     0.0f       // 蓄力保持不能用大死区，否则到位附近无保持力矩
 #define ARM_PREPARE_SPEED_DZ     0.0f
+#define TOSS_CHARGE_SPEED_LIMIT  160.0f     // 状态二电磁铁高度轴低速拉皮筋，防止瞬时速度过大脱磁
+#define TOSS_CHARGE_ANGLE_DZ     0.0f       // 蓄力保持不能用大死区，否则负载会把位置拉回去
+#define TOSS_CHARGE_SPEED_DZ     0.0f
 
 /* 上电后先给电磁铁高度电机一个小电流，把机构推回机械 0 点，再把软件坐标清零。
  * 当前只处理高度电机；击球臂不自动推零，避免意外动作。 */
@@ -341,8 +344,11 @@ void striker_update(uint32_t now_ms)
                              arm_angle_dz, arm_speed_dz, arm_speed_limit);
     }
 
+    float toss_speed_limit = (s_mode == STRIKER_PREPARE) ? TOSS_CHARGE_SPEED_LIMIT : 0.0f;
+    float toss_angle_dz = (s_mode == STRIKER_PREPARE) ? TOSS_CHARGE_ANGLE_DZ : ANGLE_DZ;
+    float toss_speed_dz = (s_mode == STRIKER_PREPARE) ? TOSS_CHARGE_SPEED_DZ : SPEED_DZ;
     float i_toss = cascade_step(&s_toss, s_toss.target, &toss_angle_pid, &toss_speed_pid,
-                                ANGLE_DZ, SPEED_DZ, 0.0f);
+                                toss_angle_dz, toss_speed_dz, toss_speed_limit);
 
     s_arm_current_cmd  = clamp_current(i_arm);
     s_toss_current_cmd = clamp_current(i_toss);
