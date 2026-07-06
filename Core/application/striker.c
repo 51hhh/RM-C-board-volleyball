@@ -6,7 +6,8 @@
   *   遥控三档：
   *     上档 IDLE    : 臂/电磁铁高度电机回 0 等待，电磁铁吸合。
   *     中档 PREPARE : 臂按规定方向慢速转到蓄力位，高度电机到蓄力位，电磁铁持续吸合。
-  *     下档 SERVE   : 电磁铁释放，臂开环给定击打电流；经过击球检测位后断流，靠重力回落。
+  *     下档 SERVE   : 电磁铁释放抛球，光电开关第二次触发并延时后臂开环击打；
+  *                    经过击球检测位后断流，靠重力回落。
   *
   *   两个位置轴都使用多圈累加坐标(度)，避免 3508 单圈编码器跨圈后只看到很小角差。
   *   状态二/三的运动目标在进入状态时锁存为规定方向上的等效多圈目标，不走最短路径。
@@ -28,12 +29,21 @@
 #define MAGNET_ACTIVE_LEVEL GPIO_PIN_SET
 #define MAGNET_RELEASE_HIZ  0U
 
+/* ===== 光电开关：PI6 =====
+ * 默认按 NPN/开漏输出处理：内部上拉，低电平表示被触发。
+ * 若传感器输出高电平有效，把 PHOTO_ACTIVE_LEVEL 改为 GPIO_PIN_SET。 */
+#define PHOTO_GPIO_Port         GPIOI
+#define PHOTO_Pin               GPIO_PIN_6
+#define PHOTO_ACTIVE_LEVEL      GPIO_PIN_RESET
+#define PHOTO_TRIGGER_DEBOUNCE_MS 20U
+#define PHOTO_STRIKE_DELAY_MS   0U
+
 /* CAN2 反馈索引 ARM_FB_IDX / TOSS_FB_IDX 已集中到 motor_config.h */
 
 /* ===== 标定量(度，多圈累加坐标；上板记录后回填) ===== */
 #define ARM_IDLE_POS              0.0f      // 状态一实测等待位：arm_pos=0.000
-#define ARM_PREPARE_POS        5344.583f   // 状态二实测蓄力位：arm_pos=5344.583
-#define ARM_STRIKE_CUTOFF_POS    (-1109.136f) // 状态三实测击球断流位：arm_pos=-1109.136
+#define ARM_PREPARE_POS        2000.583f   // 状态二实测蓄力位：arm_pos=5344.583
+#define ARM_STRIKE_CUTOFF_POS    (-1509.136f) // 状态三实测击球断流位：arm_pos=-1109.136
 #define TOSS_IDLE_POS             0.0f      // 状态一作为电磁铁高度电机相对零点
 #define TOSS_CHARGE_POS        (-5500.595f) // 状态二相对状态一位移：-296.543 - 3883.052
 
@@ -43,7 +53,7 @@
 #define TOSS_CHARGE_DIR          (-1)
 
 /* ===== 电流/限幅 ===== */
-#define ARM_STRIKE_CURRENT       13000.0f   // 状态三开环击打电流，最大不要超过 16384
+#define ARM_STRIKE_CURRENT       16000.0f   // 状态三开环击打电流，最大不要超过 16384
 #define RM3508_CURRENT_MAX       16384.0f
 #define ARM_PREPARE_SPEED_LIMIT  300.0f     // 状态二击球臂蓄力速度上限；原外环上限为 1000
 #define ARM_PREPARE_ANGLE_DZ     0.0f       // 蓄力保持不能用大死区，否则到位附近无保持力矩
@@ -89,6 +99,14 @@ static uint8_t  s_magnet_on = 0;
 static uint8_t  s_magnet_pin_output = 0xFFU;
 static uint8_t  s_magnet_pin_cmd = 0;
 static uint8_t  s_magnet_pin_level = 0;
+static uint8_t  s_photo_pin_level = 0;
+static uint8_t  s_photo_active = 0;
+static uint8_t  s_photo_active_last = 0;
+static uint8_t  s_photo_trigger_count = 0;
+static uint8_t  s_photo_strike_pending = 0;
+static uint8_t  s_photo_strike_fired = 0;
+static uint32_t s_photo_last_trigger_stamp = 0;
+static uint32_t s_photo_second_trigger_stamp = 0;
 static uint8_t  s_startup_home_started = 0;
 static uint8_t  s_startup_home_done = 0;
 static uint32_t s_startup_home_stamp = 0;
@@ -150,6 +168,74 @@ static void clear_axis_pid(void)
     pid_clear(&arm_speed_pid);
     pid_clear(&toss_angle_pid);
     pid_clear(&toss_speed_pid);
+}
+
+static void photo_sensor_init(void)
+{
+#ifdef PHOTO_GPIO_Port
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+    GPIO_InitStruct.Pin = PHOTO_Pin;
+    GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+    GPIO_InitStruct.Pull = (PHOTO_ACTIVE_LEVEL == GPIO_PIN_RESET) ? GPIO_PULLUP : GPIO_PULLDOWN;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(PHOTO_GPIO_Port, &GPIO_InitStruct);
+#endif
+}
+
+static uint8_t photo_sensor_read_active(void)
+{
+#ifdef PHOTO_GPIO_Port
+    GPIO_PinState state = HAL_GPIO_ReadPin(PHOTO_GPIO_Port, PHOTO_Pin);
+    s_photo_pin_level = (state == GPIO_PIN_SET) ? 1U : 0U;
+    s_photo_active = (state == PHOTO_ACTIVE_LEVEL) ? 1U : 0U;
+    return s_photo_active;
+#else
+    s_photo_pin_level = 0U;
+    s_photo_active = 0U;
+    return 0U;
+#endif
+}
+
+static void photo_serve_reset(void)
+{
+    s_photo_active_last = photo_sensor_read_active();
+    s_photo_trigger_count = 0U;
+    s_photo_strike_pending = 0U;
+    s_photo_strike_fired = 0U;
+    s_photo_last_trigger_stamp = 0U;
+    s_photo_second_trigger_stamp = 0U;
+}
+
+static void photo_serve_update(uint32_t now_ms)
+{
+    uint8_t active = photo_sensor_read_active();
+
+    if (active && !s_photo_active_last &&
+        (s_photo_last_trigger_stamp == 0U ||
+         now_ms - s_photo_last_trigger_stamp >= PHOTO_TRIGGER_DEBOUNCE_MS)) {
+        s_photo_last_trigger_stamp = now_ms;
+
+        if (s_photo_trigger_count < 2U) {
+            s_photo_trigger_count++;
+        }
+
+        if (s_photo_trigger_count == 2U &&
+            !s_photo_strike_pending &&
+            !s_photo_strike_fired) {
+            s_photo_strike_pending = 1U;
+            s_photo_second_trigger_stamp = now_ms;
+        }
+    }
+
+    s_photo_active_last = active;
+
+    if (s_photo_strike_pending &&
+        now_ms - s_photo_second_trigger_stamp >= PHOTO_STRIKE_DELAY_MS) {
+        s_photo_strike_pending = 0U;
+        s_photo_strike_fired = 1U;
+        s_serve_current_on = 1U;
+        clear_axis_pid();
+    }
 }
 
 /* 把 base_pos 换算成从 current_pos 出发、沿 dir 方向会遇到的等效多圈目标。
@@ -222,16 +308,20 @@ static void enter_mode(void)
         s_arm.target  = directed_target(s_arm.pos_abs,  ARM_PREPARE_POS, ARM_PREPARE_DIR);
         s_toss.target = directed_target(s_toss.pos_abs, TOSS_CHARGE_POS, TOSS_CHARGE_DIR);
         s_serve_current_on = 0;
+        s_photo_strike_pending = 0U;
+        s_photo_strike_fired = 0U;
         striker_magnet_set(true);
         break;
 
     case STRIKER_SERVE:
         s_idle_hold_current = 0;
         s_toss.target = s_toss.pos_abs;    // 高度电机不换位置，只保持进入发球瞬间的位置
+        s_arm.target = s_arm.pos_abs;      // 等待光电第二次触发前继续抱住击球臂
         s_arm_strike_cutoff = directed_target(s_arm.pos_abs, ARM_STRIKE_CUTOFF_POS, ARM_STRIKE_DIR);
-        s_serve_current_on = 1;
+        s_serve_current_on = 0;
+        photo_serve_reset();
         striker_magnet_set(false);
-        clear_axis_pid();                  // 切开环前清掉位置环积分
+        clear_axis_pid();
         break;
 
     case STRIKER_IDLE:
@@ -244,6 +334,8 @@ static void enter_mode(void)
             s_toss.target = TOSS_IDLE_POS;
         }
         s_serve_current_on = 0;
+        s_photo_strike_pending = 0U;
+        s_photo_strike_fired = 0U;
         striker_magnet_set(true);
         break;
     }
@@ -252,7 +344,7 @@ static void enter_mode(void)
 }
 
 /* 发球状态机：只负责目标/磁铁/开环阶段，不直接下发 CAN。 */
-static void serve_state_machine(void)
+static void serve_state_machine(uint32_t now_ms)
 {
     if (s_mode_entry) {
         enter_mode();
@@ -265,9 +357,11 @@ static void serve_state_machine(void)
 
     case STRIKER_SERVE:
         striker_magnet_set(false);
+        photo_serve_update(now_ms);
         if (s_serve_current_on &&
             axis_passed(s_arm.pos_abs, s_arm_strike_cutoff, ARM_STRIKE_DIR)) {
             s_serve_current_on = 0;
+            s_photo_strike_pending = 0U;
         }
         break;
 
@@ -295,13 +389,13 @@ void striker_init(void)
     s_startup_home_started = 0;
     s_startup_home_done = 0;
     s_startup_home_stamp = 0;
+    photo_sensor_init();
+    photo_serve_reset();
     striker_magnet_set(true);
 }
 
 void striker_update(uint32_t now_ms)
 {
-    (void)now_ms;
-
     // 1) 读两轴多圈角度(臂读 0x201，抛球读 0x203)
     axis_track_angle(&s_arm,  get_can2_motor_measure_point(ARM_FB_IDX)->real_angle);
     axis_track_angle(&s_toss, get_can2_motor_measure_point(TOSS_FB_IDX)->real_angle);
@@ -329,17 +423,22 @@ void striker_update(uint32_t now_ms)
     }
 
     // 3) 发球状态机：设定/锁存目标 + 电磁铁 + 开环阶段
-    serve_state_machine();
+    serve_state_machine(now_ms);
 
-    // 4) 得电流：状态三臂开环击打，其余状态臂/高度电机均位置保持
+    // 4) 得电流：SERVE 等光电期间臂仍位置保持；击打过位断流后给 0 电流靠重力回落
     float i_arm = 0.0f;
-    if (s_mode == STRIKER_SERVE) {
-        i_arm = s_serve_current_on ? (ARM_STRIKE_CURRENT * (float)ARM_STRIKE_DIR) : 0.0f;
+    if (s_mode == STRIKER_SERVE && s_serve_current_on) {
+        i_arm = ARM_STRIKE_CURRENT * (float)ARM_STRIKE_DIR;
         s_arm.pos_last = s_arm.pos_abs;     // 开环期间仍刷新速度基准，避免回位置环时速度突变
+    } else if (s_mode == STRIKER_SERVE && s_photo_strike_fired) {
+        i_arm = 0.0f;
+        s_arm.pos_last = s_arm.pos_abs;     // 断流回落期间不再位置保持
     } else {
-        float arm_speed_limit = (s_mode == STRIKER_PREPARE) ? ARM_PREPARE_SPEED_LIMIT : 0.0f;
-        float arm_angle_dz = (s_mode == STRIKER_PREPARE) ? ARM_PREPARE_ANGLE_DZ : ANGLE_DZ;
-        float arm_speed_dz = (s_mode == STRIKER_PREPARE) ? ARM_PREPARE_SPEED_DZ : SPEED_DZ;
+        uint8_t arm_hold_loaded = (s_mode == STRIKER_PREPARE ||
+                                   (s_mode == STRIKER_SERVE && !s_serve_current_on));
+        float arm_speed_limit = arm_hold_loaded ? ARM_PREPARE_SPEED_LIMIT : 0.0f;
+        float arm_angle_dz = arm_hold_loaded ? ARM_PREPARE_ANGLE_DZ : ANGLE_DZ;
+        float arm_speed_dz = arm_hold_loaded ? ARM_PREPARE_SPEED_DZ : SPEED_DZ;
         i_arm = cascade_step(&s_arm, s_arm.target, &arm_angle_pid, &arm_speed_pid,
                              arm_angle_dz, arm_speed_dz, arm_speed_limit);
     }
@@ -463,4 +562,9 @@ void striker_get_debug(striker_debug_t *debug)
     debug->magnet_pin_output = s_magnet_pin_output;
     debug->magnet_pin_cmd = s_magnet_pin_cmd;
     debug->magnet_pin_level = s_magnet_pin_level;
+    debug->photo_pin_level = s_photo_pin_level;
+    debug->photo_active = s_photo_active;
+    debug->photo_trigger_count = s_photo_trigger_count;
+    debug->photo_strike_pending = s_photo_strike_pending;
+    debug->photo_strike_fired = s_photo_strike_fired;
 }

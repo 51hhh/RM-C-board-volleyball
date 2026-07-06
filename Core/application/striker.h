@@ -7,7 +7,8 @@
   *   - 电磁铁高度：单电机(0x203)，双环位置控制。
   *   - 状态一：两轴 0 位等待，电磁铁吸合。
   *   - 状态二：两轴按规定方向到蓄力位等待，电磁铁持续吸合。
-  *   - 状态三：电磁铁释放，臂开环给击打电流，经过击球检测位后断流。
+  *   - 状态三：电磁铁释放抛球，光电开关第二次触发并延时后臂开环击打，
+  *             经过击球检测位后断流。
   ******************************************************************************
   */
 #ifndef STRIKER_H
@@ -24,7 +25,7 @@ extern "C" {
 enum {
     STRIKER_IDLE    = 0,   // 上档：两轴回 0 等待，电磁铁吸合
     STRIKER_PREPARE = 1,   // 中档：两轴按规定方向到蓄力位，电磁铁吸合
-    STRIKER_SERVE   = 2,   // 下档：电磁铁释放，臂开环击打并过位断流
+    STRIKER_SERVE   = 2,   // 下档：电磁铁释放，第二次光电触发后击打并过位断流
 };
 
 typedef struct {
@@ -45,6 +46,11 @@ typedef struct {
     uint8_t magnet_pin_output;    // 1=输出模式，0=高阻输入
     uint8_t magnet_pin_cmd;       // 1=命令高电平，0=命令低电平
     uint8_t magnet_pin_level;     // HAL 读回 PI7 实际电平
+    uint8_t photo_pin_level;      // HAL 读回 PI6 实际电平
+    uint8_t photo_active;         // 1=当前光电有效
+    uint8_t photo_trigger_count;  // 本次 SERVE 中已识别的触发次数(最多 2)
+    uint8_t photo_strike_pending; // 1=第二次触发后等待延时击打
+    uint8_t photo_strike_fired;   // 1=本次 SERVE 已经触发过击打
 } striker_debug_t;
 
 /* 击球臂/电磁铁高度位置环 PID 初始化 */
