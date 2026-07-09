@@ -40,40 +40,6 @@
 
 /* CAN2 反馈索引 ARM_FB_IDX / TOSS_FB_IDX 已集中到 motor_config.h */
 
-/* ===== 标定量(度，多圈累加坐标；上板记录后回填) ===== */
-#define ARM_IDLE_POS              0.0f      // 状态一实测等待位：arm_pos=0.000
-#define ARM_PREPARE_POS        2000.583f   // 状态二实测蓄力位：arm_pos=5344.583
-#define ARM_STRIKE_CUTOFF_POS    (-1509.136f) // 状态三实测击球断流位：arm_pos=-1109.136
-#define TOSS_IDLE_POS             0.0f      // 状态一作为电磁铁高度电机相对零点
-#define TOSS_CHARGE_POS        (-5500.595f) // 状态二相对状态一位移：-296.543 - 3883.052
-
-/* ===== 规定运动方向：+1=多圈角度增大，-1=多圈角度减小 ===== */
-#define ARM_PREPARE_DIR          (+1)
-#define ARM_STRIKE_DIR           (-1)
-#define TOSS_CHARGE_DIR          (-1)
-
-/* ===== 电流/限幅 ===== */
-#define ARM_STRIKE_CURRENT       16000.0f   // 状态三开环击打电流，最大不要超过 16384
-#define RM3508_CURRENT_MAX       16384.0f
-#define ARM_PREPARE_SPEED_LIMIT  300.0f     // 状态二击球臂蓄力速度上限；原外环上限为 1000
-#define ARM_PREPARE_ANGLE_DZ     0.0f       // 蓄力保持不能用大死区，否则到位附近无保持力矩
-#define ARM_PREPARE_SPEED_DZ     0.0f
-#define TOSS_CHARGE_SPEED_LIMIT  160.0f     // 状态二电磁铁高度轴低速拉皮筋，防止瞬时速度过大脱磁
-#define TOSS_CHARGE_ANGLE_DZ     0.0f       // 蓄力保持不能用大死区，否则负载会把位置拉回去
-#define TOSS_CHARGE_SPEED_DZ     0.0f
-
-/* 上电后先给电磁铁高度电机一个小电流，把机构推回机械 0 点，再把软件坐标清零。
- * 当前只处理高度电机；击球臂不自动推零，避免意外动作。 */
-#define TOSS_STARTUP_HOME_MS      1000U
-#define TOSS_STARTUP_HOME_CURRENT 900.0f
-
-/* 已经在目标附近时不强制再绕一圈，避免到位保持时被定向逻辑赶走 */
-#define DIRECTED_TARGET_DZ       50.0f
-
-/* ===== 级联死区(复刻原 PID_Cal_Limt：|err|≤dz 则该环清零，防到位抖动) ===== */
-#define ANGLE_DZ            50.0f
-#define SPEED_DZ            10.0f
-
 /* 单轴位置跟踪状态(PID 状态单独保存，多圈坐标用于目标和过位判断) */
 typedef struct {
     float   pos_abs;     // 多圈累加位置(度)
@@ -90,6 +56,22 @@ static axis_t s_toss;
 /* 臂/电磁铁高度：位置等待用级联 PID；状态三击打臂改为开环电流。 */
 static motor_pid_t arm_angle_pid,  arm_speed_pid;
 static motor_pid_t toss_angle_pid, toss_speed_pid;
+
+typedef struct {
+    float angle_dz;
+    float speed_dz;
+    float speed_limit;
+} axis_loop_cfg_t;
+
+enum {
+    AXIS_PROFILE_NONE = 0,
+    AXIS_PROFILE_STATE1,
+    AXIS_PROFILE_STATE2,
+    AXIS_PROFILE_STATE3_HOLD,
+};
+
+static uint8_t s_arm_profile = AXIS_PROFILE_NONE;
+static uint8_t s_toss_profile = AXIS_PROFILE_NONE;
 
 static int      s_mode = STRIKER_IDLE;      // 当前发球状态
 static uint8_t  s_mode_entry = 1;           // 下一拍执行状态进入动作
@@ -110,7 +92,7 @@ static uint32_t s_photo_second_trigger_stamp = 0;
 static uint8_t  s_startup_home_started = 0;
 static uint8_t  s_startup_home_done = 0;
 static uint32_t s_startup_home_stamp = 0;
-static float    s_arm_strike_cutoff = ARM_STRIKE_CUTOFF_POS;
+static float    s_arm_strike_cutoff = ARM_STATE3_STRIKE_CUTOFF_POS;
 static int16_t  s_arm_current_cmd = 0;
 static int16_t  s_toss_current_cmd = 0;
 
@@ -168,6 +150,136 @@ static void clear_axis_pid(void)
     pid_clear(&arm_speed_pid);
     pid_clear(&toss_angle_pid);
     pid_clear(&toss_speed_pid);
+}
+
+static void apply_pid_config(motor_pid_t *angle_pid, motor_pid_t *speed_pid,
+                             float angle_kp, float angle_ki, float angle_kd,
+                             float angle_imax, float angle_out,
+                             float speed_kp, float speed_ki, float speed_kd,
+                             float speed_imax, float speed_out)
+{
+    pid_init(angle_pid, angle_kp, angle_ki, angle_kd, angle_imax, angle_out);
+    pid_init(speed_pid, speed_kp, speed_ki, speed_kd, speed_imax, speed_out);
+}
+
+static axis_loop_cfg_t arm_apply_profile(uint8_t profile)
+{
+    axis_loop_cfg_t cfg = {ARM_STATE1_ANGLE_DZ, ARM_STATE1_SPEED_DZ, ARM_STATE1_SPEED_LIMIT};
+
+    if (s_arm_profile == profile) {
+        switch (profile) {
+        case AXIS_PROFILE_STATE2:
+            cfg.angle_dz = ARM_STATE2_ANGLE_DZ;
+            cfg.speed_dz = ARM_STATE2_SPEED_DZ;
+            cfg.speed_limit = ARM_STATE2_SPEED_LIMIT;
+            break;
+        case AXIS_PROFILE_STATE3_HOLD:
+            cfg.angle_dz = ARM_STATE3_HOLD_ANGLE_DZ;
+            cfg.speed_dz = ARM_STATE3_HOLD_SPEED_DZ;
+            cfg.speed_limit = ARM_STATE3_HOLD_SPEED_LIMIT;
+            break;
+        case AXIS_PROFILE_STATE1:
+        default:
+            break;
+        }
+        return cfg;
+    }
+
+    switch (profile) {
+    case AXIS_PROFILE_STATE2:
+        apply_pid_config(&arm_angle_pid, &arm_speed_pid,
+                         ARM_STATE2_ANG_KP, ARM_STATE2_ANG_KI, ARM_STATE2_ANG_KD,
+                         ARM_STATE2_ANG_IMAX, ARM_STATE2_ANG_OUT,
+                         ARM_STATE2_SPD_KP, ARM_STATE2_SPD_KI, ARM_STATE2_SPD_KD,
+                         ARM_STATE2_SPD_IMAX, ARM_STATE2_SPD_OUT);
+        cfg.angle_dz = ARM_STATE2_ANGLE_DZ;
+        cfg.speed_dz = ARM_STATE2_SPEED_DZ;
+        cfg.speed_limit = ARM_STATE2_SPEED_LIMIT;
+        break;
+
+    case AXIS_PROFILE_STATE3_HOLD:
+        apply_pid_config(&arm_angle_pid, &arm_speed_pid,
+                         ARM_STATE3_HOLD_ANG_KP, ARM_STATE3_HOLD_ANG_KI, ARM_STATE3_HOLD_ANG_KD,
+                         ARM_STATE3_HOLD_ANG_IMAX, ARM_STATE3_HOLD_ANG_OUT,
+                         ARM_STATE3_HOLD_SPD_KP, ARM_STATE3_HOLD_SPD_KI, ARM_STATE3_HOLD_SPD_KD,
+                         ARM_STATE3_HOLD_SPD_IMAX, ARM_STATE3_HOLD_SPD_OUT);
+        cfg.angle_dz = ARM_STATE3_HOLD_ANGLE_DZ;
+        cfg.speed_dz = ARM_STATE3_HOLD_SPEED_DZ;
+        cfg.speed_limit = ARM_STATE3_HOLD_SPEED_LIMIT;
+        break;
+
+    case AXIS_PROFILE_STATE1:
+    default:
+        apply_pid_config(&arm_angle_pid, &arm_speed_pid,
+                         ARM_STATE1_ANG_KP, ARM_STATE1_ANG_KI, ARM_STATE1_ANG_KD,
+                         ARM_STATE1_ANG_IMAX, ARM_STATE1_ANG_OUT,
+                         ARM_STATE1_SPD_KP, ARM_STATE1_SPD_KI, ARM_STATE1_SPD_KD,
+                         ARM_STATE1_SPD_IMAX, ARM_STATE1_SPD_OUT);
+        break;
+    }
+
+    s_arm_profile = profile;
+    return cfg;
+}
+
+static axis_loop_cfg_t toss_apply_profile(uint8_t profile)
+{
+    axis_loop_cfg_t cfg = {TOSS_STATE1_ANGLE_DZ, TOSS_STATE1_SPEED_DZ, TOSS_STATE1_SPEED_LIMIT};
+
+    if (s_toss_profile == profile) {
+        switch (profile) {
+        case AXIS_PROFILE_STATE2:
+            cfg.angle_dz = TOSS_STATE2_ANGLE_DZ;
+            cfg.speed_dz = TOSS_STATE2_SPEED_DZ;
+            cfg.speed_limit = TOSS_STATE2_SPEED_LIMIT;
+            break;
+        case AXIS_PROFILE_STATE3_HOLD:
+            cfg.angle_dz = TOSS_STATE3_HOLD_ANGLE_DZ;
+            cfg.speed_dz = TOSS_STATE3_HOLD_SPEED_DZ;
+            cfg.speed_limit = TOSS_STATE3_HOLD_SPEED_LIMIT;
+            break;
+        case AXIS_PROFILE_STATE1:
+        default:
+            break;
+        }
+        return cfg;
+    }
+
+    switch (profile) {
+    case AXIS_PROFILE_STATE2:
+        apply_pid_config(&toss_angle_pid, &toss_speed_pid,
+                         TOSS_STATE2_ANG_KP, TOSS_STATE2_ANG_KI, TOSS_STATE2_ANG_KD,
+                         TOSS_STATE2_ANG_IMAX, TOSS_STATE2_ANG_OUT,
+                         TOSS_STATE2_SPD_KP, TOSS_STATE2_SPD_KI, TOSS_STATE2_SPD_KD,
+                         TOSS_STATE2_SPD_IMAX, TOSS_STATE2_SPD_OUT);
+        cfg.angle_dz = TOSS_STATE2_ANGLE_DZ;
+        cfg.speed_dz = TOSS_STATE2_SPEED_DZ;
+        cfg.speed_limit = TOSS_STATE2_SPEED_LIMIT;
+        break;
+
+    case AXIS_PROFILE_STATE3_HOLD:
+        apply_pid_config(&toss_angle_pid, &toss_speed_pid,
+                         TOSS_STATE3_HOLD_ANG_KP, TOSS_STATE3_HOLD_ANG_KI, TOSS_STATE3_HOLD_ANG_KD,
+                         TOSS_STATE3_HOLD_ANG_IMAX, TOSS_STATE3_HOLD_ANG_OUT,
+                         TOSS_STATE3_HOLD_SPD_KP, TOSS_STATE3_HOLD_SPD_KI, TOSS_STATE3_HOLD_SPD_KD,
+                         TOSS_STATE3_HOLD_SPD_IMAX, TOSS_STATE3_HOLD_SPD_OUT);
+        cfg.angle_dz = TOSS_STATE3_HOLD_ANGLE_DZ;
+        cfg.speed_dz = TOSS_STATE3_HOLD_SPEED_DZ;
+        cfg.speed_limit = TOSS_STATE3_HOLD_SPEED_LIMIT;
+        break;
+
+    case AXIS_PROFILE_STATE1:
+    default:
+        apply_pid_config(&toss_angle_pid, &toss_speed_pid,
+                         TOSS_STATE1_ANG_KP, TOSS_STATE1_ANG_KI, TOSS_STATE1_ANG_KD,
+                         TOSS_STATE1_ANG_IMAX, TOSS_STATE1_ANG_OUT,
+                         TOSS_STATE1_SPD_KP, TOSS_STATE1_SPD_KI, TOSS_STATE1_SPD_KD,
+                         TOSS_STATE1_SPD_IMAX, TOSS_STATE1_SPD_OUT);
+        break;
+    }
+
+    s_toss_profile = profile;
+    return cfg;
 }
 
 static void photo_sensor_init(void)
@@ -305,8 +417,8 @@ static void enter_mode(void)
     switch (s_mode) {
     case STRIKER_PREPARE:
         s_idle_hold_current = 0;
-        s_arm.target  = directed_target(s_arm.pos_abs,  ARM_PREPARE_POS, ARM_PREPARE_DIR);
-        s_toss.target = directed_target(s_toss.pos_abs, TOSS_CHARGE_POS, TOSS_CHARGE_DIR);
+        s_arm.target  = directed_target(s_arm.pos_abs,  ARM_STATE2_POS, ARM_STATE2_DIR);
+        s_toss.target = directed_target(s_toss.pos_abs, TOSS_STATE2_POS, TOSS_STATE2_DIR);
         s_serve_current_on = 0;
         s_photo_strike_pending = 0U;
         s_photo_strike_fired = 0U;
@@ -317,7 +429,7 @@ static void enter_mode(void)
         s_idle_hold_current = 0;
         s_toss.target = s_toss.pos_abs;    // 高度电机不换位置，只保持进入发球瞬间的位置
         s_arm.target = s_arm.pos_abs;      // 等待光电第二次触发前继续抱住击球臂
-        s_arm_strike_cutoff = directed_target(s_arm.pos_abs, ARM_STRIKE_CUTOFF_POS, ARM_STRIKE_DIR);
+        s_arm_strike_cutoff = directed_target(s_arm.pos_abs, ARM_STATE3_STRIKE_CUTOFF_POS, ARM_STATE3_STRIKE_DIR);
         s_serve_current_on = 0;
         photo_serve_reset();
         striker_magnet_set(false);
@@ -330,8 +442,8 @@ static void enter_mode(void)
             s_arm.target = s_arm.pos_abs;
             s_toss.target = s_toss.pos_abs;
         } else {
-            s_arm.target  = ARM_IDLE_POS;
-            s_toss.target = TOSS_IDLE_POS;
+            s_arm.target  = ARM_STATE1_POS;
+            s_toss.target = TOSS_STATE1_POS;
         }
         s_serve_current_on = 0;
         s_photo_strike_pending = 0U;
@@ -359,7 +471,7 @@ static void serve_state_machine(uint32_t now_ms)
         striker_magnet_set(false);
         photo_serve_update(now_ms);
         if (s_serve_current_on &&
-            axis_passed(s_arm.pos_abs, s_arm_strike_cutoff, ARM_STRIKE_DIR)) {
+            axis_passed(s_arm.pos_abs, s_arm_strike_cutoff, ARM_STATE3_STRIKE_DIR)) {
             s_serve_current_on = 0;
             s_photo_strike_pending = 0U;
         }
@@ -374,18 +486,16 @@ static void serve_state_machine(uint32_t now_ms)
 
 void striker_init(void)
 {
-    // 击球臂：常规定位(温和)
-    pid_init(&arm_angle_pid, ARM_ANG_KP, ARM_ANG_KI, ARM_ANG_KD, ARM_ANG_IMAX, ARM_ANG_OUT);
-    pid_init(&arm_speed_pid, ARM_SPD_KP, ARM_SPD_KI, ARM_SPD_KD, ARM_SPD_IMAX, ARM_SPD_OUT);
-    // 电磁铁高度
-    pid_init(&toss_angle_pid, TOSS_ANG_KP, TOSS_ANG_KI, TOSS_ANG_KD, TOSS_ANG_IMAX, TOSS_ANG_OUT);
-    pid_init(&toss_speed_pid, TOSS_SPD_KP, TOSS_SPD_KI, TOSS_SPD_KD, TOSS_SPD_IMAX, TOSS_SPD_OUT);
+    s_arm_profile = AXIS_PROFILE_NONE;
+    s_toss_profile = AXIS_PROFILE_NONE;
+    (void)arm_apply_profile(AXIS_PROFILE_STATE1);
+    (void)toss_apply_profile(AXIS_PROFILE_STATE1);
 
     s_mode = STRIKER_IDLE;
     s_mode_entry = 1;
     s_idle_hold_current = 0;
-    s_arm.target = ARM_IDLE_POS;
-    s_toss.target = TOSS_IDLE_POS;
+    s_arm.target = ARM_STATE1_POS;
+    s_toss.target = TOSS_STATE1_POS;
     s_startup_home_started = 0;
     s_startup_home_done = 0;
     s_startup_home_stamp = 0;
@@ -414,7 +524,7 @@ void striker_update(uint32_t now_ms)
 
         if (now_ms - s_startup_home_stamp >= TOSS_STARTUP_HOME_MS) {
             axis_zero(&s_toss);
-            s_toss.target = TOSS_IDLE_POS;
+            s_toss.target = TOSS_STATE1_POS;
             s_startup_home_done = 1;
             s_mode_entry = 1;
             clear_axis_pid();
@@ -428,26 +538,32 @@ void striker_update(uint32_t now_ms)
     // 4) 得电流：SERVE 等光电期间臂仍位置保持；击打过位断流后给 0 电流靠重力回落
     float i_arm = 0.0f;
     if (s_mode == STRIKER_SERVE && s_serve_current_on) {
-        i_arm = ARM_STRIKE_CURRENT * (float)ARM_STRIKE_DIR;
+        i_arm = ARM_STATE3_STRIKE_CURRENT * (float)ARM_STATE3_STRIKE_DIR;
         s_arm.pos_last = s_arm.pos_abs;     // 开环期间仍刷新速度基准，避免回位置环时速度突变
     } else if (s_mode == STRIKER_SERVE && s_photo_strike_fired) {
         i_arm = 0.0f;
         s_arm.pos_last = s_arm.pos_abs;     // 断流回落期间不再位置保持
     } else {
-        uint8_t arm_hold_loaded = (s_mode == STRIKER_PREPARE ||
-                                   (s_mode == STRIKER_SERVE && !s_serve_current_on));
-        float arm_speed_limit = arm_hold_loaded ? ARM_PREPARE_SPEED_LIMIT : 0.0f;
-        float arm_angle_dz = arm_hold_loaded ? ARM_PREPARE_ANGLE_DZ : ANGLE_DZ;
-        float arm_speed_dz = arm_hold_loaded ? ARM_PREPARE_SPEED_DZ : SPEED_DZ;
+        uint8_t arm_profile = AXIS_PROFILE_STATE1;
+        if (s_mode == STRIKER_PREPARE) {
+            arm_profile = AXIS_PROFILE_STATE2;
+        } else if (s_mode == STRIKER_SERVE) {
+            arm_profile = AXIS_PROFILE_STATE3_HOLD;
+        }
+        axis_loop_cfg_t arm_cfg = arm_apply_profile(arm_profile);
         i_arm = cascade_step(&s_arm, s_arm.target, &arm_angle_pid, &arm_speed_pid,
-                             arm_angle_dz, arm_speed_dz, arm_speed_limit);
+                             arm_cfg.angle_dz, arm_cfg.speed_dz, arm_cfg.speed_limit);
     }
 
-    float toss_speed_limit = (s_mode == STRIKER_PREPARE) ? TOSS_CHARGE_SPEED_LIMIT : 0.0f;
-    float toss_angle_dz = (s_mode == STRIKER_PREPARE) ? TOSS_CHARGE_ANGLE_DZ : ANGLE_DZ;
-    float toss_speed_dz = (s_mode == STRIKER_PREPARE) ? TOSS_CHARGE_SPEED_DZ : SPEED_DZ;
+    uint8_t toss_profile = AXIS_PROFILE_STATE1;
+    if (s_mode == STRIKER_PREPARE) {
+        toss_profile = AXIS_PROFILE_STATE2;
+    } else if (s_mode == STRIKER_SERVE) {
+        toss_profile = AXIS_PROFILE_STATE3_HOLD;
+    }
+    axis_loop_cfg_t toss_cfg = toss_apply_profile(toss_profile);
     float i_toss = cascade_step(&s_toss, s_toss.target, &toss_angle_pid, &toss_speed_pid,
-                                toss_angle_dz, toss_speed_dz, toss_speed_limit);
+                                toss_cfg.angle_dz, toss_cfg.speed_dz, toss_cfg.speed_limit);
 
     s_arm_current_cmd  = clamp_current(i_arm);
     s_toss_current_cmd = clamp_current(i_toss);
