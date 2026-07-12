@@ -20,16 +20,10 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include "usbd_cdc_if.h"
-#ifdef __cplusplus
-extern "C" {
-#endif
-void rc_forward_notify_usb_tx_complete(void);
-void rc_forward_notify_usb_unavailable(void);
-#ifdef __cplusplus
-}
-#endif
 
 /* USER CODE BEGIN INCLUDE */
+#include "../../Core/application/rc_forward.h"
+#include "usb_device.h"
 
 /* USER CODE END INCLUDE */
 
@@ -176,6 +170,7 @@ static int8_t CDC_DeInit_FS(void)
 {
   /* USER CODE BEGIN 4 */
   CDC_NotifyUsbBusReset_FS();
+  USB_DEVICE_NotifyBusReset();
   return (USBD_OK);
   /* USER CODE END 4 */
 }
@@ -379,6 +374,16 @@ void CDC_NotifyUsbBusReset_FS(void)
 {
   s_cdc_control_line_state = 0U;
   rc_forward_notify_usb_unavailable();
+}
+
+void CDC_NotifyUsbSuspend_FS(void)
+{
+  /* Suspend 不等同于断线；保留 DTR 和在途发送状态。 */
+}
+
+void CDC_NotifyUsbResume_FS(void)
+{
+  rc_forward_notify_usb_resume();
 }
 
 /* USER CODE END PRIVATE_FUNCTIONS_IMPLEMENTATION */

@@ -114,6 +114,8 @@ uint8_t CDC_IsHostOpen_FS(void);
 uint8_t CDC_IsTxReady_FS(void);
 uint16_t CDC_GetControlLineState_FS(void);
 void CDC_NotifyUsbBusReset_FS(void);
+void CDC_NotifyUsbSuspend_FS(void);
+void CDC_NotifyUsbResume_FS(void);
 
 /* USER CODE END EXPORTED_FUNCTIONS */
 

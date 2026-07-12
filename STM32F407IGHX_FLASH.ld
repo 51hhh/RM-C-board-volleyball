@@ -185,11 +185,12 @@ SECTIONS
     __bss_end__ = _ebss;
   } >RAM
 
-  /* Keep the USB reset-storm guard across software resets. */
+  /* Preserve fault diagnostics across software resets. */
   .noinit (NOLOAD) :
   {
     . = ALIGN(8);
-    *(.noinit.usb_retry_guard)
+    *(.noinit)
+    *(.noinit*)
     . = ALIGN(8);
   } >RAM
 

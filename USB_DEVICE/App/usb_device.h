@@ -81,6 +81,14 @@ void MX_USB_DEVICE_Init(void);
  * -- Insert functions declaration here --
  */
 /* USER CODE BEGIN FD */
+enum {
+  USB_RECOVERY_REASON_TX_TIMEOUT = 1U,
+  USB_RECOVERY_REASON_ENUM_TIMEOUT = 2U
+};
+
+void USB_DEVICE_RequestRecovery(uint32_t reason);
+void USB_DEVICE_NotifyBusReset(void);
+void USB_DEVICE_Process(void);
 
 /* USER CODE END FD */
 /**

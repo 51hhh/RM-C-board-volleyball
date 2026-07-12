@@ -4,7 +4,25 @@
 extern UART_HandleTypeDef huart3;
 extern DMA_HandleTypeDef hdma_usart3_rx;
 
-#define RC_DMA_DISABLE_TIMEOUT_MS 2U
+#define RC_DMA_DISABLE_MAX_SPINS 10000U
+#define RC_DMA_ALL_FLAGS (DMA_FLAG_FEIF1_5 | DMA_FLAG_DMEIF1_5 | \
+                          DMA_FLAG_TEIF1_5 | DMA_FLAG_HTIF1_5 | DMA_FLAG_TCIF1_5)
+
+static uint8_t rc_dma_disable(void)
+{
+    uint32_t spins = RC_DMA_DISABLE_MAX_SPINS;
+
+    __HAL_DMA_DISABLE(&hdma_usart3_rx);
+    while ((hdma_usart3_rx.Instance->CR & DMA_SxCR_EN) != 0U)
+    {
+        __HAL_DMA_DISABLE(&hdma_usart3_rx);
+        if (--spins == 0U)
+        {
+            return 0U;
+        }
+    }
+    return 1U;
+}
 
 //初始化USART3的DMA
 void RC_init(uint8_t *rx1_buf, uint8_t *rx2_buf, uint16_t dma_buf_num)
@@ -19,15 +37,9 @@ void RC_init(uint8_t *rx1_buf, uint8_t *rx2_buf, uint16_t dma_buf_num)
 
     //disable DMA
     //失效DMA
-    __HAL_DMA_DISABLE(&hdma_usart3_rx);
-    uint32_t disable_start = HAL_GetTick();
-    while(hdma_usart3_rx.Instance->CR & DMA_SxCR_EN)
+    if (rc_dma_disable() == 0U)
     {
-        __HAL_DMA_DISABLE(&hdma_usart3_rx);
-        if ((HAL_GetTick() - disable_start) > RC_DMA_DISABLE_TIMEOUT_MS)
-        {
-            Error_Handler();
-        }
+        Error_Handler();
     }
 
     hdma_usart3_rx.Instance->PAR = (uint32_t) & (USART3->DR);
@@ -46,11 +58,10 @@ void RC_init(uint8_t *rx1_buf, uint8_t *rx2_buf, uint16_t dma_buf_num)
 
     //enable DMA
     //使能DMA
+    __HAL_DMA_CLEAR_FLAG(&hdma_usart3_rx, RC_DMA_ALL_FLAGS);
     __HAL_DMA_ENABLE(&hdma_usart3_rx);
 
 }
-
-
 
 
 

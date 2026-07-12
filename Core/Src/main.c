@@ -29,7 +29,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "usb_device.h"
-#include "usb_retry_guard.h"
+#include "fault_recovery.h"
 #include "../application/remote_control.h"
 #include "../application/rc_forward.h"
 #include "../application/led_indicator.h"
@@ -74,7 +74,7 @@ void SystemClock_Config(void);
 int main(void)
 {
   /* USER CODE BEGIN 1 */
-  uint8_t usb_retry_guard_cleared = 0U;
+  uint8_t fault_stable_marked = 0U;
 
   /* USER CODE END 1 */
 
@@ -118,10 +118,11 @@ int main(void)
   while (1)
   {
       rc_forward_poll();
+      USB_DEVICE_Process();
       led_update(HAL_GetTick());
-      if ((usb_retry_guard_cleared == 0U) && (HAL_GetTick() >= 10000U)) {
-          usb_retry_guard_mark_stable();
-          usb_retry_guard_cleared = 1U;
+      if ((fault_stable_marked == 0U) && (HAL_GetTick() >= 10000U)) {
+          fault_recovery_mark_stable();
+          fault_stable_marked = 1U;
       }
 
     /* USER CODE END WHILE */
@@ -195,7 +196,7 @@ void Error_Handler(void)
   {
     __BKPT(0);
   }
-  usb_retry_guard_reset_or_halt();
+  fault_recovery_fatal(FAULT_REASON_ERROR_HANDLER);
   /* USER CODE END Error_Handler_Debug */
 }
 #ifdef USE_FULL_ASSERT

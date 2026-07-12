@@ -50,8 +50,11 @@ void rc_forward_poll(void);
 /* USB CDC 回调唤起：在 USB 收发完成时由 usbd_cdc_if.c 触发。 */
 void rc_forward_notify_usb_tx_complete(void);
 
-/* USB 断开/复位/挂起时清理本地发送忙状态，避免等待已丢失的完成回调。 */
+/* USB 断开/复位时清理本地发送状态，避免等待已丢失的完成回调。 */
 void rc_forward_notify_usb_unavailable(void);
+
+/* USB Resume 后重新开始在途传输超时计时，不把挂起时长算入超时。 */
+void rc_forward_notify_usb_resume(void);
 
 #ifdef __cplusplus
 }

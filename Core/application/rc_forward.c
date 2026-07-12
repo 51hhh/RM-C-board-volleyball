@@ -4,6 +4,7 @@
 #include "remote_control.h"
 #include "stm32f4xx_hal.h"
 #include "usbd_cdc_if.h"
+#include "usb_device.h"
 #include <string.h>
 
 #ifndef USE_USB_FORWARD
@@ -17,49 +18,34 @@
 
 static uint32_t s_last_remote_frame = 0U;
 static uint16_t s_seq = 0U;
-static volatile uint8_t s_cdc_busy = 0U;
-static volatile uint8_t s_pending = 0U;
-static volatile uint32_t s_cdc_busy_start_tick = 0U;
+static volatile uint8_t s_tx_active = 0U;
+static volatile uint32_t s_tx_start_tick = 0U;
+static uint8_t s_pending = 0U;
+static uint8_t s_recovery_requested = 0U;
+static uint32_t s_cdc_busy_since = 0U;
 static rc_forward_frame_t s_pending_frame;
+static rc_forward_frame_t s_tx_frame;
 
 _Static_assert(sizeof(rc_forward_frame_t) == RC_FORWARD_FRAME_LEN, "rc_forward frame must be 24 bytes");
 
-#if USE_USB_FORWARD
-static void rc_forward_set_cdc_busy(uint8_t busy)
+static uint8_t rc_forward_tx_timed_out(uint32_t now_tick)
 {
-    uint32_t primask = __get_PRIMASK();
-    __disable_irq();
-    s_cdc_busy = busy;
-    s_cdc_busy_start_tick = busy ? HAL_GetTick() : 0U;
-    __set_PRIMASK(primask);
-}
-
-static uint8_t rc_forward_is_cdc_busy(uint32_t now_tick)
-{
-    uint8_t busy = 0U;
-    uint32_t busy_start = 0U;
+    uint8_t timed_out = 0U;
     uint32_t primask = __get_PRIMASK();
 
     __disable_irq();
-    busy = s_cdc_busy;
-    busy_start = s_cdc_busy_start_tick;
-    if ((busy != 0U) && ((now_tick - busy_start) > RC_FORWARD_USB_TX_BUSY_TIMEOUT_MS)) {
-        /* 传输栈异常时释放 BUSY，下一拍可重发，防止永远停滞。 */
-        s_cdc_busy = 0U;
-        s_cdc_busy_start_tick = 0U;
-        busy = 0U;
+    if ((s_tx_active != 0U) &&
+        ((now_tick - s_tx_start_tick) > RC_FORWARD_USB_TX_BUSY_TIMEOUT_MS)) {
+        s_pending_frame = s_tx_frame;
+        s_pending = 1U;
+        s_tx_active = 0U;
+        s_tx_start_tick = 0U;
+        timed_out = 1U;
     }
     __set_PRIMASK(primask);
 
-    return busy;
+    return timed_out;
 }
-#else
-static uint8_t rc_forward_is_cdc_busy(uint32_t now_tick)
-{
-    (void)now_tick;
-    return 0U;
-}
-#endif
 
 #if !USE_USB_FORWARD
 static uint8_t rc_forward_send_impl(const rc_forward_frame_t *frame)
@@ -76,18 +62,28 @@ static uint8_t rc_forward_send_impl(const rc_forward_frame_t *frame)
 static uint8_t rc_forward_send_impl(const rc_forward_frame_t *frame)
 {
     uint8_t result = USBD_FAIL;
+    uint32_t primask = 0U;
 
     if (frame == NULL) {
         return USBD_FAIL;
     }
-    if (CDC_IsTxReady_FS() == 0U) {
+
+    primask = __get_PRIMASK();
+    __disable_irq();
+    if ((s_tx_active != 0U) || (CDC_IsTxReady_FS() == 0U)) {
+        __set_PRIMASK(primask);
         return USBD_BUSY;
     }
-    result = CDC_Transmit_FS((uint8_t *)frame, RC_FORWARD_FRAME_LEN);
-    if (result == USBD_OK) {
-        /* USB 正在发送，等待完成回调清 BUSY */
-        rc_forward_set_cdc_busy(1U);
+
+    s_tx_frame = *frame;
+    s_tx_active = 1U;
+    s_tx_start_tick = HAL_GetTick();
+    result = CDC_Transmit_FS((uint8_t *)&s_tx_frame, RC_FORWARD_FRAME_LEN);
+    if (result != USBD_OK) {
+        s_tx_active = 0U;
+        s_tx_start_tick = 0U;
     }
+    __set_PRIMASK(primask);
     return result;
 }
 #endif
@@ -110,21 +106,24 @@ static uint16_t crc16_modbus(const uint8_t *data, uint16_t len)
 
 void rc_forward_notify_usb_tx_complete(void)
 {
-    /* USB 发送完成回调，允许下一帧补发 */
-#if USE_USB_FORWARD
-    rc_forward_set_cdc_busy(0U);
-#else
-    s_cdc_busy = 0U;
-#endif
+    s_tx_active = 0U;
+    s_tx_start_tick = 0U;
+    s_cdc_busy_since = 0U;
 }
 
 void rc_forward_notify_usb_unavailable(void)
 {
-#if USE_USB_FORWARD
-    rc_forward_set_cdc_busy(0U);
-#else
-    s_cdc_busy = 0U;
-#endif
+    s_tx_active = 0U;
+    s_tx_start_tick = 0U;
+    s_recovery_requested = 0U;
+    s_cdc_busy_since = 0U;
+}
+
+void rc_forward_notify_usb_resume(void)
+{
+    if (s_tx_active != 0U) {
+        s_tx_start_tick = HAL_GetTick();
+    }
 }
 
 void rc_forward_init(void)
@@ -132,13 +131,13 @@ void rc_forward_init(void)
     /* 以当前 DBUS 帧计数初始化，避免上电重复转发上一拍 */
     s_last_remote_frame = remote_control_get_frame_count();
     s_seq = 0U;
-#if USE_USB_FORWARD
-    rc_forward_set_cdc_busy(0U);
-#else
-    s_cdc_busy = 0U;
-#endif
+    s_tx_active = 0U;
+    s_tx_start_tick = 0U;
     s_pending = 0U;
+    s_recovery_requested = 0U;
+    s_cdc_busy_since = 0U;
     memset((void *)&s_pending_frame, 0, sizeof(s_pending_frame));
+    memset((void *)&s_tx_frame, 0, sizeof(s_tx_frame));
 }
 
 void rc_forward_poll(void)
@@ -147,10 +146,18 @@ void rc_forward_poll(void)
     uint32_t current_frame = 0U;
     uint8_t send_result = USBD_BUSY;
     const uint32_t now_tick = HAL_GetTick();
-    uint8_t cdc_busy = rc_forward_is_cdc_busy(now_tick);
 
-    current_frame = remote_control_copy(&rc_snapshot);
+    if ((CDC_IsHostOpen_FS() != 0U) &&
+        (s_recovery_requested == 0U) &&
+        rc_forward_tx_timed_out(now_tick)) {
+        s_recovery_requested = 1U;
+        USB_DEVICE_RequestRecovery(USB_RECOVERY_REASON_TX_TIMEOUT);
+        return;
+    }
+
+    current_frame = remote_control_get_frame_count();
     if (current_frame != s_last_remote_frame) {
+        current_frame = remote_control_copy(&rc_snapshot);
         rc_forward_frame_t frame = {0};
         /* 构建定长二进制帧：避开文本解析歧义，便于上位机 CRC 校验 */
         frame.magic = RC_FORWARD_MAGIC;
@@ -176,13 +183,25 @@ void rc_forward_poll(void)
     }
 
     if (CDC_IsHostOpen_FS() == 0U) {
-        rc_forward_set_cdc_busy(0U);
+        s_cdc_busy_since = 0U;
         return;
     }
-    cdc_busy = rc_forward_is_cdc_busy(now_tick);
 
     /* 空闲且有待发数据才发送一次；否则不重复发送历史帧。 */
-    if (s_pending && !cdc_busy) {
+    if (s_pending && (s_tx_active == 0U)) {
+        if (CDC_IsTxReady_FS() == 0U) {
+            if (s_cdc_busy_since == 0U) {
+                s_cdc_busy_since = now_tick;
+            } else if ((s_recovery_requested == 0U) &&
+                       ((now_tick - s_cdc_busy_since) > RC_FORWARD_USB_TX_BUSY_TIMEOUT_MS)) {
+                /* 上层空闲但 CDC TxState 长期非零，说明内部状态已失步。 */
+                s_recovery_requested = 1U;
+                s_cdc_busy_since = 0U;
+                USB_DEVICE_RequestRecovery(USB_RECOVERY_REASON_TX_TIMEOUT);
+            }
+            return;
+        }
+        s_cdc_busy_since = 0U;
         send_result = rc_forward_send_impl(&s_pending_frame);
         if (send_result == USBD_OK) {
             s_pending = 0U;

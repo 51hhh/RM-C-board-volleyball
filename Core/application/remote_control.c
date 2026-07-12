@@ -39,6 +39,8 @@ extern DMA_HandleTypeDef hdma_usart3_rx;
   * @retval         none
   */
 static void sbus_to_rc(volatile const uint8_t *sbus_buf, RC_ctrl_t *rc_ctrl);
+static uint8_t rc_dma_disable(void);
+static void rc_dma_restart(uint32_t current_target);
 
 //remote control data
 //遥控器控制变量
@@ -100,77 +102,65 @@ uint32_t remote_control_copy(RC_ctrl_t *out)
 //串口中断
 void remote_control_uart3_handler(void)
 {
-    if(huart3.Instance->SR & UART_FLAG_RXNE)//接收到数据
-    {
-        __HAL_UART_CLEAR_PEFLAG(&huart3);
+    uint32_t status = huart3.Instance->SR;
+    uint32_t current_target;
+    uint16_t received_length;
+    uint8_t *completed_buffer;
+
+    if ((status & (UART_FLAG_IDLE | UART_FLAG_PE | UART_FLAG_FE |
+                   UART_FLAG_NE | UART_FLAG_ORE)) == 0U) {
+        return;
     }
-    else if(USART3->SR & UART_FLAG_IDLE)
-    {
-        static uint16_t this_time_rx_len = 0;
 
-        __HAL_UART_CLEAR_PEFLAG(&huart3);
+    /* STM32F4 的 IDLE/PE/FE/NE/ORE 通过依次读取 SR、DR 清除。 */
+    (void)huart3.Instance->SR;
+    (void)huart3.Instance->DR;
 
-        if ((hdma_usart3_rx.Instance->CR & DMA_SxCR_CT) == RESET)
-        {
-            /* Current memory buffer used is Memory 0 */
+    current_target = hdma_usart3_rx.Instance->CR & DMA_SxCR_CT;
+    if (rc_dma_disable() == 0U) {
+        return;
+    }
 
-            //disable DMA
-            //失效DMA
-            __HAL_DMA_DISABLE(&hdma_usart3_rx);
+    received_length = (uint16_t)(SBUS_RX_BUF_NUM - hdma_usart3_rx.Instance->NDTR);
+    completed_buffer = (current_target == 0U) ? sbus_rx_buf[0] : sbus_rx_buf[1];
+    rc_dma_restart(current_target);
 
-            //get receive data length, length = set_data_length - remain_length
-            //获取接收数据长度,长度 = 设定长度 - 剩余长度
-            this_time_rx_len = SBUS_RX_BUF_NUM - hdma_usart3_rx.Instance->NDTR;
+    /* 半包仅用于重新同步；完整 IDLE 帧沿用旧版行为，不新增字段/错误校验。 */
+    if (((status & UART_FLAG_IDLE) != 0U) &&
+        (received_length == RC_FRAME_LENGTH)) {
+        sbus_to_rc(completed_buffer, &rc_ctrl);
+        s_frame_count++;
+    }
+}
 
-            //reset set_data_lenght
-            //重新设定数据长度
-            hdma_usart3_rx.Instance->NDTR = SBUS_RX_BUF_NUM;
+#define RC_DMA_DISABLE_MAX_SPINS 10000U
+#define RC_DMA_ALL_FLAGS (DMA_FLAG_FEIF1_5 | DMA_FLAG_DMEIF1_5 | \
+                          DMA_FLAG_TEIF1_5 | DMA_FLAG_HTIF1_5 | DMA_FLAG_TCIF1_5)
 
-            //set memory buffer 1
-            //设定缓冲区1
-            hdma_usart3_rx.Instance->CR |= DMA_SxCR_CT;
+static uint8_t rc_dma_disable(void)
+{
+    uint32_t spins = RC_DMA_DISABLE_MAX_SPINS;
 
-            //enable DMA
-            //使能DMA
-            __HAL_DMA_ENABLE(&hdma_usart3_rx);
-
-            if(this_time_rx_len == RC_FRAME_LENGTH)
-            {
-                sbus_to_rc(sbus_rx_buf[0], &rc_ctrl);
-                s_frame_count++;
-            }
-        }
-        else
-        {
-            /* Current memory buffer used is Memory 1 */
-            //disable DMA
-            //失效DMA
-            __HAL_DMA_DISABLE(&hdma_usart3_rx);
-
-            //get receive data length, length = set_data_length - remain_length
-            //获取接收数据长度,长度 = 设定长度 - 剩余长度
-            this_time_rx_len = SBUS_RX_BUF_NUM - hdma_usart3_rx.Instance->NDTR;
-
-            //reset set_data_lenght
-            //重新设定数据长度
-            hdma_usart3_rx.Instance->NDTR = SBUS_RX_BUF_NUM;
-
-            //set memory buffer 0
-            //设定缓冲区0
-            DMA1_Stream1->CR &= ~(DMA_SxCR_CT);
-
-            //enable DMA
-            //使能DMA
-            __HAL_DMA_ENABLE(&hdma_usart3_rx);
-
-            if(this_time_rx_len == RC_FRAME_LENGTH)
-            {
-                //处理遥控器数据
-                sbus_to_rc(sbus_rx_buf[1], &rc_ctrl);
-                s_frame_count++;
-            }
+    __HAL_DMA_DISABLE(&hdma_usart3_rx);
+    while ((hdma_usart3_rx.Instance->CR & DMA_SxCR_EN) != 0U) {
+        __HAL_DMA_DISABLE(&hdma_usart3_rx);
+        if (--spins == 0U) {
+            return 0U;
         }
     }
+    return 1U;
+}
+
+static void rc_dma_restart(uint32_t current_target)
+{
+    hdma_usart3_rx.Instance->NDTR = SBUS_RX_BUF_NUM;
+    if (current_target == 0U) {
+        SET_BIT(hdma_usart3_rx.Instance->CR, DMA_SxCR_CT);
+    } else {
+        CLEAR_BIT(hdma_usart3_rx.Instance->CR, DMA_SxCR_CT);
+    }
+    __HAL_DMA_CLEAR_FLAG(&hdma_usart3_rx, RC_DMA_ALL_FLAGS);
+    __HAL_DMA_ENABLE(&hdma_usart3_rx);
 }
 
 uint32_t remote_control_get_frame_count(void)

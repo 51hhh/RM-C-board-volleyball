@@ -23,7 +23,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "../application/remote_control.h"
-#include "usb_retry_guard.h"
+#include "fault_recovery.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -54,55 +54,27 @@
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
-/* ============================================================================
- * 故障诊断：捕获 SCB 故障状态寄存器 + 异常压栈帧，取代原裸 while(1)。
- * 调试器在线则断点停下，否则自动复位，避免脱机运行时永久卡死。
- *   - 开启硬 FPU 后，FPU 惰性压栈相关故障会体现在 CFSR 的 MLSPERR/LSPERR/
- *     MSTKERR/MUNSTKERR 位，可借此区分是否 FPU 上下文压栈出错。
- * 由各 Fault_Handler 经 asm 取栈帧指针(MSP/PSP)与 EXC_RETURN 后跳入。
- * ==========================================================================*/
-volatile struct {
-    uint32_t cfsr;       /* SCB->CFSR  可配置故障状态(含 FPU 压栈错误位) */
-    uint32_t hfsr;       /* SCB->HFSR  硬故障状态 */
-    uint32_t mmfar;      /* SCB->MMFAR 内存管理故障地址 */
-    uint32_t bfar;       /* SCB->BFAR  总线故障地址 */
-    uint32_t r0, r1, r2, r3, r12, lr, pc, psr; /* 异常压栈帧 */
-    uint32_t exc_return; /* LR 中的 EXC_RETURN(判别 MSP/PSP、是否含 FP 帧) */
-} g_fault_info;
-
-void Fault_Capture(uint32_t *frame, uint32_t exc_return)
-{
-    g_fault_info.cfsr  = SCB->CFSR;
-    g_fault_info.hfsr  = SCB->HFSR;
-    g_fault_info.mmfar = SCB->MMFAR;
-    g_fault_info.bfar  = SCB->BFAR;
-    g_fault_info.r0  = frame[0];
-    g_fault_info.r1  = frame[1];
-    g_fault_info.r2  = frame[2];
-    g_fault_info.r3  = frame[3];
-    g_fault_info.r12 = frame[4];
-    g_fault_info.lr  = frame[5];
-    g_fault_info.pc  = frame[6];   /* 触发故障的指令地址 */
-    g_fault_info.psr = frame[7];
-    g_fault_info.exc_return = exc_return;
-
-    if (CoreDebug->DHCSR & CoreDebug_DHCSR_C_DEBUGEN_Msk) {
-        __BKPT(0);                 /* 调试器在线：断下，便于现场查 g_fault_info */
-    }
-    usb_retry_guard_reset_or_halt();
-}
-
-/* 故障入口：取活动栈指针(EXC_RETURN bit2 选 MSP/PSP)+ LR，尾跳到 C 捕获。
- * 仅用 r0/r1(caller-saved)，不改 SP，确保栈帧指针准确。 */
-#define FAULT_ENTRY()                       \
-    __asm volatile (                        \
-        "tst   lr, #4            \n"        \
-        "ite   eq                \n"        \
-        "mrseq r0, msp           \n"        \
-        "mrsne r0, psp           \n"        \
-        "mov   r1, lr            \n"        \
-        "b     Fault_Capture     \n"        \
+/* 使用独立 CCM 应急栈进入 C 捕获函数，避免原 MSP 损坏时在 Fault 内二次 Fault。 */
+#define FAULT_ENTRY(reason_value)                       \
+    __asm volatile (                                    \
+        "tst   lr, #4                         \n"      \
+        "ite   eq                             \n"      \
+        "mrseq r0, msp                        \n"      \
+        "mrsne r0, psp                        \n"      \
+        "mov   r1, lr                         \n"      \
+        "movs  r2, %0                         \n"      \
+        "ldr   r3, =g_fault_emergency_stack   \n"      \
+        "add   r3, r3, #512                   \n"      \
+        "msr   msp, r3                        \n"      \
+        "b     Fault_Capture                  \n"      \
+        : : "I" (reason_value) : "r0", "r1", "r2", "r3", "memory" \
     )
+
+void NMI_Handler(void) __attribute__((naked));
+void HardFault_Handler(void) __attribute__((naked));
+void MemManage_Handler(void) __attribute__((naked));
+void BusFault_Handler(void) __attribute__((naked));
+void UsageFault_Handler(void) __attribute__((naked));
 
 /* USER CODE END 0 */
 
@@ -129,7 +101,7 @@ extern UART_HandleTypeDef huart3;
 void NMI_Handler(void)
 {
   /* USER CODE BEGIN NonMaskableInt_IRQn 0 */
-
+  FAULT_ENTRY(FAULT_REASON_NMI);
   /* USER CODE END NonMaskableInt_IRQn 0 */
   /* USER CODE BEGIN NonMaskableInt_IRQn 1 */
    while (1)
@@ -144,7 +116,7 @@ void NMI_Handler(void)
 void HardFault_Handler(void)
 {
   /* USER CODE BEGIN HardFault_IRQn 0 */
-  FAULT_ENTRY();   /* 捕获故障现场到 g_fault_info，不再静默 while(1) */
+  FAULT_ENTRY(FAULT_REASON_HARDFAULT);
   /* USER CODE END HardFault_IRQn 0 */
   while (1)
   {
@@ -159,7 +131,7 @@ void HardFault_Handler(void)
 void MemManage_Handler(void)
 {
   /* USER CODE BEGIN MemoryManagement_IRQn 0 */
-  FAULT_ENTRY();   /* 捕获故障现场到 g_fault_info */
+  FAULT_ENTRY(FAULT_REASON_MEMMANAGE);
   /* USER CODE END MemoryManagement_IRQn 0 */
   while (1)
   {
@@ -174,7 +146,7 @@ void MemManage_Handler(void)
 void BusFault_Handler(void)
 {
   /* USER CODE BEGIN BusFault_IRQn 0 */
-  FAULT_ENTRY();   /* 捕获故障现场到 g_fault_info */
+  FAULT_ENTRY(FAULT_REASON_BUSFAULT);
   /* USER CODE END BusFault_IRQn 0 */
   while (1)
   {
@@ -189,7 +161,7 @@ void BusFault_Handler(void)
 void UsageFault_Handler(void)
 {
   /* USER CODE BEGIN UsageFault_IRQn 0 */
-  FAULT_ENTRY();   /* 捕获故障现场到 g_fault_info */
+  FAULT_ENTRY(FAULT_REASON_USAGEFAULT);
   /* USER CODE END UsageFault_IRQn 0 */
   while (1)
   {
@@ -306,11 +278,12 @@ void USART1_IRQHandler(void)
 void USART3_IRQHandler(void)
 {
   /* USER CODE BEGIN USART3_IRQn 0 */
-
+  remote_control_uart3_handler();
+  return;
   /* USER CODE END USART3_IRQn 0 */
   HAL_UART_IRQHandler(&huart3);
   /* USER CODE BEGIN USART3_IRQn 1 */
-    remote_control_uart3_handler();
+
   /* USER CODE END USART3_IRQn 1 */
 }
 
