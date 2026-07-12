@@ -1,202 +1,173 @@
 # RM-C-board-volleyball 排球机器人底盘控制系统
 
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](http://www.apache.org/licenses/LICENSE-2.0)
-[![Language](https://img.shields.io/badge/Language-C-blue.svg)]()
 [![Platform](https://img.shields.io/badge/Platform-STM32F407-red.svg)]()
+[![Language](https://img.shields.io/badge/Language-C-blue.svg)]()
 
-基于 **STM32F407IGHx** 的排球机器人嵌入式控制系统，实现麦克纳姆轮全向底盘运动控制、DM4340 电机 MIT 模式控制、BMI088 IMU 姿态感知、SBUS 遥控器控制，并通过串口接收上位机视觉检测坐标实现自动追球。
+基于 **STM32F407IGHx**（168MHz, Cortex-M4F）的排球机器人嵌入式控制系统。
 
-> **项目定位**：本项目是排球机器人系统的**下位机控制模块**，需配合上位机视觉系统才能实现自动追球功能。上位机负责检测排球并发送坐标，本项目负责解析坐标并驱动底盘运动。
+> **分支说明**：`serve-vehicle-A` 是发球车 A 的开发分支，集成了底盘全向运动 + 发球击球机构。
 
-## 排球机器人系统全景
+---
 
-| 仓库 | 角色 | 说明 |
-|------|------|------|
-| [yolov8_volleyball](https://github.com/51hhh/yolov8_volleyball) | 上位机（推荐） | YOLOv8+NanoDet 双引擎，Boost.Asio 串口通信 |
-| [nanodet_volleyball](https://github.com/51hhh/nanodet_volleyball) | 上位机 | NanoDet 专用版，终端坐标输出 |
-| [Nanodet_OpenVINO](https://github.com/51hhh/Nanodet_OpenVINO) | 上位机（调试用） | NanoDet 可视化调试版本 |
-| **RM-C-board-volleyball**（本项目） | 下位机 | STM32F407 麦克纳姆轮底盘控制 |
-
-## 特性
-
-- **麦克纳姆轮全向底盘**：4 轮独立 PID 速度闭环，支持全向移动与旋转
-- **DM4340 电机控制**：CAN 总线 MIT 控制模式（可同时控制位置/速度/力矩），支持位置闭环
-- **M3508 底盘电机**：CAN 通信，速度环 PID 控制
-- **BMI088 六轴 IMU**：SPI 接口驱动，加速度 + 陀螺仪数据采集
-- **卡尔曼滤波**：加速度计零偏估计与噪声滤波
-- **陀螺仪航向保持**：Z 轴角速度积分 + PID 回正控制
-- **SBUS 遥控器**：DMA 双缓冲接收，支持多档位状态切换
-- **串口坐标接收**：USART1 接收上位机视觉系统发送的排球坐标，融合至底盘运动控制
-- **UART DMA 发送队列**：环形缓冲区 + DMA 非阻塞发送，调试信息不阻塞主循环
-- **3 种控制模式**：遥控模式 / 自动追球模式 / 失能模式
-- **GPIO 中断触发**：PB12 下降沿触发 DM4340 电机动作序列（50ms 消抖）
-
-## 系统架构
+## 硬件拓扑
 
 ```
-┌──────────────┐  UART 115200bps  ┌────────────────────────────────────┐
-│  上位机       │ ───────────────▶ │  STM32F407IGHx (168MHz)           │
-│  视觉检测系统 │  坐标 "v,u\n"    │                                    │
-│              │                  │  ┌──────────┐   ┌──────────────┐  │
-│ yolov8_      │                  │  │ SBUS遥控  │   │ BMI088 IMU   │  │
-│ volleyball / │                  │  │ (USART3)  │   │ (SPI1)       │  │
-│ nanodet_     │                  │  └─────┬────┘   └──────┬───────┘  │
-│ volleyball   │                  │        │                │          │
-└──────────────┘                  │        ▼                ▼          │
-                                   │  ┌─────────────────────────────┐  │
-                                   │  │    主控制循环               │  │
-                                   │  │    状态机 + PID 控制        │  │
-                                   │  │    麦克纳姆轮运动学解算     │  │
-                                   │  │    卡尔曼滤波               │  │
-                                   │  └─────────┬───────────────────┘  │
-                                   │            │                      │
-                                   │     ┌──────┴──────┐               │
-                                   │     ▼             ▼               │
-                                   │  ┌───────┐  ┌──────────┐         │
-                                   │  │ CAN1  │  │  CAN2    │         │
-                                   │  │M3508  │  │ DM4340   │         │
-                                   │  │底盘x4 │  │ 执行x3   │         │
-                                   │  └───────┘  └──────────┘         │
-                                   └────────────────────────────────────┘
+      SBUS 遥控                    BMI088 IMU
+    (USART3 DMA)                  (SPI1)
+         │                            │
+         ▼                            ▼
+┌─────────────────────────────────────────┐
+│           STM32F407IGHx                 │
+│                                         │
+│  ┌──────────┐  ┌──────────┐            │
+│  │ 底盘控制  │  │ 发球控制  │           │
+│  │ 麦轮逆解  │  │ 状态机   │           │
+│  │ 速度环PID │  │ 双环级联 │           │
+│  └────┬─────┘  └────┬─────┘            │
+│       │              │                  │
+│    CAN1 (1Mbps)   CAN2 (1Mbps)         │
+│       │              │                  │
+│  4× M3508        3× M3508       PI7   PI6
+│  底盘电机        击球臂A/B      电磁铁 光电开关
+│  (0x201-204)     抛球电机
+│                  (0x201-203)
+└─────────────────────────────────────────┘
 ```
 
-## 项目结构
+---
+
+## 控制说明
+
+### 遥控器布局
+
+| 拨杆 | 功能 |
+|------|------|
+| **右拨杆** | 底盘模式切换 |
+| **左拨杆** | 发球状态切换 |
+
+### 底盘模式（右拨杆）
+
+| 模式 | 拨杆位置 | 说明 |
+|------|---------|------|
+| Mode 3 失能 | 中档 / 初始 | 所有电机停止 |
+| Mode 1 遥控 | 上拨 | 摇杆控制底盘全向移动 |
+| Mode 0 校准 | 下拨 | IMU 零偏校准，约 2 秒后自动进入 Mode 2 |
+| Mode 2 自动 | 校准完成自动 | 上位机坐标 + 遥控融合 + Wz 航向保持 |
+
+### 发球状态（左拨杆）
+
+| 状态 | 拨杆位置 | 动作 |
+|------|---------|------|
+| **IDLE** | 上拨 | 臂归零，抛球归零，电磁铁吸合 |
+| **PREPARE** | 中档 | 臂慢速转到蓄力位，抛球转到蓄力位，电磁铁持续吸合 |
+| **SERVE** | 下拨 | 电磁铁释放抛球 → 光电开关检测 → 臂开环击打 → 过位断流回落 |
+
+### 发球时序
 
 ```
-RM-C-board-volleyball/
-├── Core/
-│   ├── Src/
-│   │   ├── main.c                 # 主控制循环、状态机、麦轮解算、卡尔曼滤波
-│   │   ├── pid.c                  # PID 控制器实现（带积分限幅）
-│   │   ├── bsp_can.c              # CAN 底层过滤器配置与初始化
-│   │   └── ...                    # HAL 外设初始化（gpio, dma, can, spi, usart, tim）
-│   ├── Inc/
-│   │   ├── main.h / pid.h / bsp_can.h
-│   │   └── ...
-│   ├── application/
-│   │   ├── CAN_receive.c/.h       # CAN 通信、M3508 反馈解析、DM4340 MIT 控制与位置闭环
-│   │   ├── remote_control.c/.h    # SBUS 协议解析、DMA 双缓冲
-│   │   ├── BMI088driver.c/.h      # BMI088 SPI 驱动（加速度计 + 陀螺仪）
-│   │   ├── BMI088Middleware.c/.h  # BMI088 SPI 底层中间件
-│   │   ├── BMI088reg.h            # BMI088 寄存器定义
-│   │   ├── bsp_rc.c/.h            # 遥控器底层驱动
-│   │   └── struct_typedef.h       # 类型定义
-│   └── Startup/
-│       └── startup_stm32f407ighx.s  # 启动文件
-├── Drivers/
-│   ├── CMSIS/                     # ARM CMSIS 核心库
-│   └── STM32F4xx_HAL_Driver/      # ST HAL 驱动库
-├── docs/
-│   └── DEBUG.md                   # 详细调试指南
-├── scripts/
-│   └── debug/
-│       ├── auto_test_can.py       # 自动化 CAN 测试脚本
-│       ├── debug_can.sh           # 交互式调试启动脚本
-│       └── README.md              # 调试脚本使用说明
-├── config/
-│   ├── daplink.cfg                # DAPLink 调试配置（当前使用）
-│   └── stlink.cfg                 # ST-Link 调试配置
-├── LED.ioc                        # STM32CubeMX 工程配置
-├── CMakeLists.txt                 # ARM GCC 交叉编译配置
-├── STM32F407IGHX_FLASH.ld         # Flash 链接脚本
-├── STM32F407IGHX_RAM.ld           # RAM 链接脚本
-├── CLAUDE.md                      # Claude Code 项目指南
-└── README.md                      # 本文件
+左拨杆下拨 → 电磁铁释放(PI7↓)
+    → 球下落通过光电开关(PI6) 第 1 次（计数）
+    → 球再次通过光电开关 第 2 次 → 延时 → 臂开环击打(±16000电流)
+    → 臂到达击球断流位 → 断电靠重力回落
 ```
 
-> 注：CubeMX 工程名为 `LED.ioc`，因此编译产物命名为 `LED.elf/hex/bin`。
-
-## 控制模式
-
-通过遥控器右拨杆切换控制模式：
-
-| 模式 | 遥控器右拨杆 | SBUS 值 | 说明 |
-|------|-------------|---------|------|
-| **type=3** | 中档 / 初始 | `0x03` / `0x00` | 失能模式，所有电机停止 |
-| **type=1** | 上拨 | `0x01` | 遥控模式，摇杆控制底盘全向移动 |
-| **type=0** | 下拨 | `0x02` | 初始化模式：IMU 零偏校准（约 2 秒后自动进入 type=2） |
-| **type=2** | 校准完成后自动进入 | — | 自动追球 + 遥控融合模式 |
-
-### 自动追球模式 (type=2)
-
-融合上位机视觉坐标与遥控器输入：
-
-```c
-// 上位机发送 "out_x,out_y\n"，sscanf 解析为: 第1个值→uart_y, 第2个值→uart_x
-// 因此 uart_y 实际对应上位机的水平偏移，uart_x 对应垂直偏移
-
-float Vx = -(uart_x / 100.0f) + y_normalized * 5;  // 前后运动
-float Vy = x_normalized * 5 + wz_compensation;      // 旋转 = 手动 + 陀螺仪PID回正
-float Wz = -(uart_y / 100.0f) + z_normalized * 5;   // 左右运动
-```
-
-> 注：遥控器摇杆归一化值（-1~1）乘以系数 5 放大控制量。`speed_scale = 1000 × (遥控器速度通道 + 1)` 实现速度倍率调节。
-
-## 硬件配置
-
-### MCU
-
-- **型号**：STM32F407IGHx
-- **主频**：168 MHz（HSE 12MHz + PLL）
-- **Flash**：1 MB
-- **RAM**：192 KB
-
-### 外设映射
-
-| 外设 | 功能 | 说明 |
-|------|------|------|
-| CAN1 | M3508 底盘电机 | 4 路速度闭环 |
-| CAN2 | DM4340 执行电机 | 3 路 MIT 模式控制 + 位置闭环 |
-| USART1 | 上位机通信 | 接收视觉坐标 / DMA 调试输出 |
-| USART3 | SBUS 遥控器 | DMA 双缓冲接收 |
-| SPI1 | BMI088 IMU | 加速度计 + 陀螺仪 |
-| TIM10 | 系统定时 | 控制节拍 |
-| PB12 | GPIO 中断 | 下降沿触发 DM4340 动作序列（50ms 消抖） |
-| PH10/PH11 | LED 指示 | 状态指示灯 |
-
-### 电机参数
-
-| 电机 | 型号 | 控制方式 | 用途 |
-|------|------|---------|------|
-| 底盘电机 x4 | M3508 | CAN1 速度环 PID | 麦克纳姆轮驱动 |
-| 执行电机 x3 | DM4340 | CAN2 MIT 模式 + 位置闭环 PID | 击球/发球执行机构 |
-
-> MIT 模式：源自 MIT Cheetah 项目的电机控制协议，允许单条 CAN 报文同时下发位置、速度、力矩三个控制量。
-
-## 环境要求
-
-### 软件工具
-
-| 工具 | 说明 | 安装方式 |
-|------|------|---------|
-| ARM GCC | `arm-none-eabi-gcc` 交叉编译器 | `sudo apt install gcc-arm-none-eabi` |
-| CMake | >= 3.30 | `sudo apt install cmake` |
-| STM32CubeMX | 外设配置（可选，修改 .ioc 时需要） | [ST 官网下载](https://www.st.com/en/development-tools/stm32cubemx.html) |
-| DAPLink/ST-Link | 调试下载器（硬件） | — |
-| OpenOCD / STM32CubeProgrammer | 烧录工具 | `sudo apt install openocd` |
+---
 
 ## 编译与烧录
 
 ### 编译
 
 ```bash
-git clone https://github.com/51hhh/RM-C-board-volleyball.git
-cd RM-C-board-volleyball
-mkdir -p cmake-build-debug && cd cmake-build-debug
-cmake -DCMAKE_BUILD_TYPE=Debug ..
+cd build
+cmake .. -DCMAKE_BUILD_TYPE=Debug
 make -j$(nproc)
 ```
 
-编译产物：
-- `LED.elf` — ELF 可执行文件
-- `LED.hex` — Intel HEX 烧录文件
-- `LED.bin` — 二进制烧录文件
+产物：`build/LED.elf`、`build/LED.hex`、`build/LED.bin`
 
-### 烧录
+### 烧录（probe-rs）
 
 ```bash
-# 使用 OpenOCD + DAPLink/CMSIS-DAP（推荐）
-openocd -f config/daplink.cfg -c "program cmake-build-debug/LED.elf verify reset exit"
+probe-rs download --chip STM32F407IGHx build/LED.elf
+```
+
+### GDB 调试
+
+```bash
+# 终端1
+probe-rs gdb --chip STM32F407IGHx
+
+# 终端2
+gdb-multiarch -x scripts/debug/check_can2_rc.gdb build/LED.elf
+```
+
+---
+
+## 关键参数调参
+
+所有电机 PID、目标位置、电流限幅集中在 `Core/application/motor_config.h`，分状态独立配置：
+
+| 参数组 | 说明 |
+|--------|------|
+| `CHASSIS_*` | 底盘四轮速度环 |
+| `ARM_STATE1_*` | 击球臂 IDLE 归位保持（软参数防抖动） |
+| `ARM_STATE2_*` | 击球臂 PREPARE 蓄力 |
+| `ARM_STATE3_HOLD_*` | 击球臂 SERVE 光电检测前保持 |
+| `ARM_STATE3_STRIKE_*` | 击球臂开环击打电流和断流位 |
+| `TOSS_STATE1_*` | 抛球电机 IDLE 归位保持 |
+| `TOSS_STATE2_*` | 抛球电机 PREPARE 蓄力 |
+| `TOSS_STATE3_HOLD_*` | 抛球电机 SERVE 保持 |
+
+其他标定量在 `Core/application/striker.c` 顶部：
+- 光电开关引脚、有效电平、消抖时间、击打延时
+- 电磁铁引脚、有效电平
+
+---
+
+## 项目结构
+
+```
+Core/
+├── Src/
+│   ├── main.c              # 入口：HAL初始化 → 控制链启动 → while(1)
+│   ├── scheduler.c/h        # TIM6@1kHz 时基 + 非阻塞延时事件
+│   ├── pid.c/h              # 通用增量式 PID
+│   └── ...
+├── application/
+│   ├── robot_control.c/h    # 控制编排：底盘状态机 + 遥控 + IMU + 遥测
+│   ├── chassis.c/h          # 麦轮逆解 + 四轮速度环 + CAN1 下发
+│   ├── striker.c/h          # 发球机构：三状态 + 双环级联 ± 光电触发 + CAN2 下发
+│   ├── CAN_receive.c/h      # M3508/DM4340 CAN 收发
+│   ├── remote_control.c/h   # SBUS 协议解析
+│   ├── host_comm.c/h        # 上位机 UART 坐标接收
+│   ├── imu_filter.c/h       # 三轴卡尔曼滤波
+│   ├── led_indicator.c/h    # RGB LED 状态指示
+│   └── motor_config.h       # ⭐ 全部电机参数集中配置
+├── Inc/                     # HAL 外设头文件
+└── Startup/                 # 启动汇编
+```
+
+---
+
+## 遥控器 → SBUS 字节映射
+
+| 字节 | 含义 | 典型值 |
+|------|------|--------|
+| `rc.s[0]` | 右拨杆 | 1=上, 2=下, 3=中, 0=初始 |
+| `rc.s[1]` | 左拨杆 | 1=上, 2=下, 3=中, 0=初始 |
+| `rc.ch[0]` | Wz 旋转 | -660 ~ +660 |
+| `rc.ch[1]` | Vx 前后 | -660 ~ +660 |
+| `rc.ch[2]` | Vy 左右 | -660 ~ +660 |
+| `rc.ch[3]` | 速度倍率 | -660 ~ +660 |
+
+---
+
+## 远程仓库
+
+| 名称 | 地址 |
+|------|------|
+| `origin` | git@github.com:51hhh/RM-C-board-volleyball.git |
+| `me` | git@github.com:r0semaryrabb1t/RM-C-board-volleyball.git |
 
 # 使用 OpenOCD + ST-Link
 openocd -f config/stlink.cfg -c "program cmake-build-debug/LED.elf verify reset exit"
