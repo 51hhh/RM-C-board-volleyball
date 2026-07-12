@@ -38,29 +38,29 @@
 #define ARM_STATE1_ANG_OUT         300.0f
 #define ARM_STATE1_SPD_KP          5.0f
 #define ARM_STATE1_SPD_KI          0.0f
-#define ARM_STATE1_SPD_KD          0.08f
+#define ARM_STATE1_SPD_KD          0.0f
 #define ARM_STATE1_SPD_IMAX        1000.0f
 #define ARM_STATE1_SPD_OUT         2200.0f
 #define ARM_STATE1_ANGLE_DZ        80.0f
-#define ARM_STATE1_SPEED_DZ        15.0f
+#define ARM_STATE1_SPEED_DZ        0.0f
 #define ARM_STATE1_SPEED_LIMIT     80.0f
 
 /* 击球臂 - 状态2：蓄力到位并保持。 */
-#define ARM_STATE2_POS             2000.583f
+#define ARM_STATE2_POS             3500.583f
 #define ARM_STATE2_DIR             (+1)
-#define ARM_STATE2_ANG_KP          6.0f
+#define ARM_STATE2_ANG_KP          0.25f
 #define ARM_STATE2_ANG_KI          0.0f
 #define ARM_STATE2_ANG_KD          0.0f
-#define ARM_STATE2_ANG_IMAX        1000.0f
-#define ARM_STATE2_ANG_OUT         1000.0f
-#define ARM_STATE2_SPD_KP          15.0f
-#define ARM_STATE2_SPD_KI          0.0f
-#define ARM_STATE2_SPD_KD          0.05f
-#define ARM_STATE2_SPD_IMAX        4000.0f
-#define ARM_STATE2_SPD_OUT         10000.0f
+#define ARM_STATE2_ANG_IMAX        0.0f
+#define ARM_STATE2_ANG_OUT         500.0f
+#define ARM_STATE2_SPD_KP          16.0f
+#define ARM_STATE2_SPD_KI          0.01f
+#define ARM_STATE2_SPD_KD          0.0f
+#define ARM_STATE2_SPD_IMAX        3500.0f
+#define ARM_STATE2_SPD_OUT         8000.0f
 #define ARM_STATE2_ANGLE_DZ        0.0f
 #define ARM_STATE2_SPEED_DZ        0.0f
-#define ARM_STATE2_SPEED_LIMIT     300.0f
+#define ARM_STATE2_SPEED_LIMIT     1000.0f
 
 /* 击球臂 - 状态3：等待光电触发前的位置保持。 */
 #define ARM_STATE3_HOLD_ANG_KP       2.5f
@@ -70,11 +70,11 @@
 #define ARM_STATE3_HOLD_ANG_OUT      600.0f
 #define ARM_STATE3_HOLD_SPD_KP       8.0f
 #define ARM_STATE3_HOLD_SPD_KI       0.0f
-#define ARM_STATE3_HOLD_SPD_KD       0.10f
+#define ARM_STATE3_HOLD_SPD_KD       0.0f
 #define ARM_STATE3_HOLD_SPD_IMAX     1800.0f
 #define ARM_STATE3_HOLD_SPD_OUT      4500.0f
 #define ARM_STATE3_HOLD_ANGLE_DZ     10.0f
-#define ARM_STATE3_HOLD_SPEED_DZ     5.0f
+#define ARM_STATE3_HOLD_SPEED_DZ     0.0f
 #define ARM_STATE3_HOLD_SPEED_LIMIT  160.0f
 
 /* 击球臂 - 状态3击打：开环电流 + 断流检测位置。 */
@@ -100,29 +100,29 @@
 #define TOSS_STATE1_ANG_OUT          300.0f
 #define TOSS_STATE1_SPD_KP           4.0f
 #define TOSS_STATE1_SPD_KI           0.0f
-#define TOSS_STATE1_SPD_KD           0.10f
+#define TOSS_STATE1_SPD_KD           0.0f
 #define TOSS_STATE1_SPD_IMAX         800.0f
 #define TOSS_STATE1_SPD_OUT          1800.0f
 #define TOSS_STATE1_ANGLE_DZ         60.0f
-#define TOSS_STATE1_SPEED_DZ         10.0f
+#define TOSS_STATE1_SPEED_DZ         0.0f
 #define TOSS_STATE1_SPEED_LIMIT      80.0f
 
 /* 电磁铁高度 - 状态2：拉齿条到蓄力位并保持。 */
 #define TOSS_STATE2_POS              (-5500.595f)
 #define TOSS_STATE2_DIR              (-1)
-#define TOSS_STATE2_ANG_KP           2.0f
+#define TOSS_STATE2_ANG_KP           0.50f
 #define TOSS_STATE2_ANG_KI           0.0f
-#define TOSS_STATE2_ANG_KD           2.0f
-#define TOSS_STATE2_ANG_IMAX         1000.0f
-#define TOSS_STATE2_ANG_OUT          1000.0f
-#define TOSS_STATE2_SPD_KP           6.0f
-#define TOSS_STATE2_SPD_KI           0.02f
-#define TOSS_STATE2_SPD_KD           0.3f
-#define TOSS_STATE2_SPD_IMAX         2500.0f
-#define TOSS_STATE2_SPD_OUT          6000.0f
+#define TOSS_STATE2_ANG_KD           0.0f
+#define TOSS_STATE2_ANG_IMAX         0.0f
+#define TOSS_STATE2_ANG_OUT          800.0f
+#define TOSS_STATE2_SPD_KP           10.0f
+#define TOSS_STATE2_SPD_KI           0.015f
+#define TOSS_STATE2_SPD_KD           0.0f
+#define TOSS_STATE2_SPD_IMAX         8000.0f
+#define TOSS_STATE2_SPD_OUT          12000.0f
 #define TOSS_STATE2_ANGLE_DZ         0.0f
 #define TOSS_STATE2_SPEED_DZ         0.0f
-#define TOSS_STATE2_SPEED_LIMIT      160.0f
+#define TOSS_STATE2_SPEED_LIMIT      800.0f
 
 /* 电磁铁高度 - 状态3：释放后保持进入发球瞬间的位置。 */
 #define TOSS_STATE3_HOLD_ANG_KP       1.8f
@@ -132,11 +132,11 @@
 #define TOSS_STATE3_HOLD_ANG_OUT      700.0f
 #define TOSS_STATE3_HOLD_SPD_KP       6.0f
 #define TOSS_STATE3_HOLD_SPD_KI       0.01f
-#define TOSS_STATE3_HOLD_SPD_KD       0.15f
+#define TOSS_STATE3_HOLD_SPD_KD       0.0f
 #define TOSS_STATE3_HOLD_SPD_IMAX     1600.0f
 #define TOSS_STATE3_HOLD_SPD_OUT      3500.0f
 #define TOSS_STATE3_HOLD_ANGLE_DZ     5.0f
-#define TOSS_STATE3_HOLD_SPEED_DZ     5.0f
+#define TOSS_STATE3_HOLD_SPEED_DZ     0.0f
 #define TOSS_STATE3_HOLD_SPEED_LIMIT  120.0f
 
 /* =========================== 发球机构公共参数 =========================== */

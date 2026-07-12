@@ -389,7 +389,7 @@ static void axis_zero(axis_t *ax)
 }
 
 /* 双环级联一步：角度外环 -> 速度内环，各带死区。返回电流设定。 */
-static float cascade_step(axis_t *ax, float target,
+static float cascade_step(axis_t *ax, float target, float speed_rpm,
                           motor_pid_t *apid, motor_pid_t *spid,
                           float a_dz, float s_dz,
                           float speed_limit)
@@ -402,11 +402,10 @@ static float cascade_step(axis_t *ax, float target,
         out_a = clampf(out_a, -speed_limit, speed_limit);
     }
 
-    // 速度内环：反馈 = 本拍位置增量(度/拍)，设定 = 角度环输出
-    float speed = ax->pos_abs - ax->pos_last;
+    // 速度内环：设定和反馈均使用 M3508 原生 RPM，避免 1ms 角度差分的量化噪声。
     ax->pos_last = ax->pos_abs;
-    float s_err = out_a - speed;
-    float out_s = pid_calc(spid, out_a, speed);
+    float s_err = out_a - speed_rpm;
+    float out_s = pid_calc(spid, out_a, speed_rpm);
     if (fabsf(s_err) <= s_dz) { out_s = 0.0f; spid->i_out = 0.0f; }   // 死区
 
     return out_s;
@@ -506,9 +505,12 @@ void striker_init(void)
 
 void striker_update(uint32_t now_ms)
 {
+    const motor_measure_t *arm_motor = get_can2_motor_measure_point(ARM_FB_IDX);
+    const motor_measure_t *toss_motor = get_can2_motor_measure_point(TOSS_FB_IDX);
+
     // 1) 读两轴多圈角度(臂读 0x201，抛球读 0x203)
-    axis_track_angle(&s_arm,  get_can2_motor_measure_point(ARM_FB_IDX)->real_angle);
-    axis_track_angle(&s_toss, get_can2_motor_measure_point(TOSS_FB_IDX)->real_angle);
+    axis_track_angle(&s_arm, arm_motor->real_angle);
+    axis_track_angle(&s_toss, toss_motor->real_angle);
 
     // 2) 上电高度电机机械归零：小电流推 1 秒，然后把高度多圈坐标清零
     if (!s_startup_home_done) {
@@ -551,7 +553,8 @@ void striker_update(uint32_t now_ms)
             arm_profile = AXIS_PROFILE_STATE3_HOLD;
         }
         axis_loop_cfg_t arm_cfg = arm_apply_profile(arm_profile);
-        i_arm = cascade_step(&s_arm, s_arm.target, &arm_angle_pid, &arm_speed_pid,
+        i_arm = cascade_step(&s_arm, s_arm.target, (float)arm_motor->speed_rpm,
+                             &arm_angle_pid, &arm_speed_pid,
                              arm_cfg.angle_dz, arm_cfg.speed_dz, arm_cfg.speed_limit);
     }
 
@@ -562,7 +565,8 @@ void striker_update(uint32_t now_ms)
         toss_profile = AXIS_PROFILE_STATE3_HOLD;
     }
     axis_loop_cfg_t toss_cfg = toss_apply_profile(toss_profile);
-    float i_toss = cascade_step(&s_toss, s_toss.target, &toss_angle_pid, &toss_speed_pid,
+    float i_toss = cascade_step(&s_toss, s_toss.target, (float)toss_motor->speed_rpm,
+                                &toss_angle_pid, &toss_speed_pid,
                                 toss_cfg.angle_dz, toss_cfg.speed_dz, toss_cfg.speed_limit);
 
     s_arm_current_cmd  = clamp_current(i_arm);
@@ -583,6 +587,13 @@ void striker_set_mode(int mode)
         /* 遥控三档从下档回上档时物理上会经过中档。
          * 已经发球后的 SERVE -> PREPARE 视为过渡噪声，避免逆向切换时重新蓄力。 */
         if (s_mode == STRIKER_SERVE && mode == STRIKER_PREPARE) {
+            return;
+        }
+
+        /* 下档发球结束后，中档过渡不会改变 s_mode；继续拨到上档时重启 MCU，
+         * 让下一次发球从完整的上电初始化和机械归零流程开始。 */
+        if (s_mode == STRIKER_SERVE && mode == STRIKER_IDLE) {
+            NVIC_SystemReset();
             return;
         }
 
