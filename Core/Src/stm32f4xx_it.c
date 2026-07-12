@@ -23,6 +23,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "../application/remote_control.h"
+#include "usb_retry_guard.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -88,9 +89,7 @@ void Fault_Capture(uint32_t *frame, uint32_t exc_return)
     if (CoreDebug->DHCSR & CoreDebug_DHCSR_C_DEBUGEN_Msk) {
         __BKPT(0);                 /* 调试器在线：断下，便于现场查 g_fault_info */
     }
-    __DSB();
-    NVIC_SystemReset();            /* 脱机运行：复位并重新枚举 USB */
-    while (1) { }
+    usb_retry_guard_reset_or_halt();
 }
 
 /* 故障入口：取活动栈指针(EXC_RETURN bit2 选 MSP/PSP)+ LR，尾跳到 C 捕获。

@@ -185,6 +185,14 @@ SECTIONS
     __bss_end__ = _ebss;
   } >RAM
 
+  /* Keep the USB reset-storm guard across software resets. */
+  .noinit (NOLOAD) :
+  {
+    . = ALIGN(8);
+    *(.noinit.usb_retry_guard)
+    . = ALIGN(8);
+  } >RAM
+
   /* User_heap_stack section, used to check that there is enough "RAM" Ram  type memory left */
   ._user_heap_stack :
   {
