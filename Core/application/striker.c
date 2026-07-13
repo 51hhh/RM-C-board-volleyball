@@ -6,7 +6,7 @@
   *   遥控三档：
   *     上档 IDLE    : 臂/电磁铁高度电机回 0 等待，电磁铁吸合。
   *     中档 PREPARE : 臂按规定方向慢速转到蓄力位，高度电机到蓄力位，电磁铁持续吸合。
-  *     下档 SERVE   : 电磁铁释放抛球，光电开关第二次触发并延时后臂开环击打；
+  *     下档 SERVE   : 电磁铁释放抛球，光电开关第一次触发 300ms 后臂开环击打；
   *                    经过击球检测位后断流，靠重力回落。
   *
   *   两个位置轴都使用多圈累加坐标(度)，避免 3508 单圈编码器跨圈后只看到很小角差。
@@ -35,8 +35,9 @@
 #define PHOTO_GPIO_Port         GPIOI
 #define PHOTO_Pin               GPIO_PIN_6
 #define PHOTO_ACTIVE_LEVEL      GPIO_PIN_RESET
-#define PHOTO_TRIGGER_DEBOUNCE_MS 20U
-#define PHOTO_STRIKE_DELAY_MS   0U
+#define PHOTO_ACTIVE_STABLE_MS  5U
+#define PHOTO_RELEASE_STABLE_MS 20U
+#define PHOTO_STRIKE_DELAY_MS   260U
 
 /* CAN2 反馈索引 ARM_FB_IDX / TOSS_FB_IDX 已集中到 motor_config.h */
 
@@ -84,11 +85,13 @@ static uint8_t  s_magnet_pin_level = 0;
 static uint8_t  s_photo_pin_level = 0;
 static uint8_t  s_photo_active = 0;
 static uint8_t  s_photo_active_last = 0;
+static uint8_t  s_photo_stable_active = 0;
+static uint8_t  s_photo_armed = 0;
 static uint8_t  s_photo_trigger_count = 0;
 static uint8_t  s_photo_strike_pending = 0;
 static uint8_t  s_photo_strike_fired = 0;
-static uint32_t s_photo_last_trigger_stamp = 0;
-static uint32_t s_photo_second_trigger_stamp = 0;
+static uint32_t s_photo_level_stamp = 0;
+static uint32_t s_photo_trigger_stamp = 0;
 static uint8_t  s_startup_home_started = 0;
 static uint8_t  s_startup_home_done = 0;
 static uint32_t s_startup_home_stamp = 0;
@@ -308,41 +311,52 @@ static uint8_t photo_sensor_read_active(void)
 #endif
 }
 
-static void photo_serve_reset(void)
+static void photo_serve_reset(uint32_t now_ms)
 {
-    s_photo_active_last = photo_sensor_read_active();
+    uint8_t active = photo_sensor_read_active();
+
+    s_photo_active_last = active;
+    s_photo_stable_active = active;
+    s_photo_armed = active ? 0U : 1U;
     s_photo_trigger_count = 0U;
     s_photo_strike_pending = 0U;
     s_photo_strike_fired = 0U;
-    s_photo_last_trigger_stamp = 0U;
-    s_photo_second_trigger_stamp = 0U;
+    s_photo_level_stamp = now_ms;
+    s_photo_trigger_stamp = 0U;
 }
 
 static void photo_serve_update(uint32_t now_ms)
 {
     uint8_t active = photo_sensor_read_active();
 
-    if (active && !s_photo_active_last &&
-        (s_photo_last_trigger_stamp == 0U ||
-         now_ms - s_photo_last_trigger_stamp >= PHOTO_TRIGGER_DEBOUNCE_MS)) {
-        s_photo_last_trigger_stamp = now_ms;
+    if (active != s_photo_active_last) {
+        s_photo_active_last = active;
+        s_photo_level_stamp = now_ms;
+    }
 
-        if (s_photo_trigger_count < 2U) {
-            s_photo_trigger_count++;
+    if (active) {
+        if (now_ms - s_photo_level_stamp >= PHOTO_ACTIVE_STABLE_MS) {
+            s_photo_stable_active = 1U;
+
+            if (s_photo_armed && s_photo_trigger_count == 0U) {
+                s_photo_armed = 0U;
+                s_photo_trigger_count = 1U;
+                s_photo_strike_pending = 1U;
+                s_photo_trigger_stamp = now_ms;
+            }
         }
+    } else if (now_ms - s_photo_level_stamp >= PHOTO_RELEASE_STABLE_MS) {
+        s_photo_stable_active = 0U;
 
-        if (s_photo_trigger_count == 2U &&
-            !s_photo_strike_pending &&
-            !s_photo_strike_fired) {
-            s_photo_strike_pending = 1U;
-            s_photo_second_trigger_stamp = now_ms;
+        if (!s_photo_strike_pending &&
+            !s_photo_strike_fired &&
+            s_photo_trigger_count == 0U) {
+            s_photo_armed = 1U;
         }
     }
 
-    s_photo_active_last = active;
-
     if (s_photo_strike_pending &&
-        now_ms - s_photo_second_trigger_stamp >= PHOTO_STRIKE_DELAY_MS) {
+        now_ms - s_photo_trigger_stamp >= PHOTO_STRIKE_DELAY_MS) {
         s_photo_strike_pending = 0U;
         s_photo_strike_fired = 1U;
         s_serve_current_on = 1U;
@@ -411,7 +425,7 @@ static float cascade_step(axis_t *ax, float target, float speed_rpm,
     return out_s;
 }
 
-static void enter_mode(void)
+static void enter_mode(uint32_t now_ms)
 {
     switch (s_mode) {
     case STRIKER_PREPARE:
@@ -427,10 +441,10 @@ static void enter_mode(void)
     case STRIKER_SERVE:
         s_idle_hold_current = 0;
         s_toss.target = s_toss.pos_abs;    // 高度电机不换位置，只保持进入发球瞬间的位置
-        s_arm.target = s_arm.pos_abs;      // 等待光电第二次触发前继续抱住击球臂
+        s_arm.target = s_arm.pos_abs;      // 等待第一次光电触发及 300ms 延时期间继续抱住击球臂
         s_arm_strike_cutoff = directed_target(s_arm.pos_abs, ARM_STATE3_STRIKE_CUTOFF_POS, ARM_STATE3_STRIKE_DIR);
         s_serve_current_on = 0;
-        photo_serve_reset();
+        photo_serve_reset(now_ms);
         striker_magnet_set(false);
         clear_axis_pid();
         break;
@@ -458,7 +472,7 @@ static void enter_mode(void)
 static void serve_state_machine(uint32_t now_ms)
 {
     if (s_mode_entry) {
-        enter_mode();
+        enter_mode(now_ms);
     }
 
     switch (s_mode) {
@@ -499,7 +513,7 @@ void striker_init(void)
     s_startup_home_done = 0;
     s_startup_home_stamp = 0;
     photo_sensor_init();
-    photo_serve_reset();
+    photo_serve_reset(0U);
     striker_magnet_set(true);
 }
 
@@ -691,6 +705,8 @@ void striker_get_debug(striker_debug_t *debug)
     debug->magnet_pin_level = s_magnet_pin_level;
     debug->photo_pin_level = s_photo_pin_level;
     debug->photo_active = s_photo_active;
+    debug->photo_stable_active = s_photo_stable_active;
+    debug->photo_armed = s_photo_armed;
     debug->photo_trigger_count = s_photo_trigger_count;
     debug->photo_strike_pending = s_photo_strike_pending;
     debug->photo_strike_fired = s_photo_strike_fired;
