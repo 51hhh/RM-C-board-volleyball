@@ -78,7 +78,7 @@
 #define ARM_STATE3_HOLD_SPEED_LIMIT  160.0f
 
 /* 击球臂 - 状态3击打：开环电流 + 断流检测位置。 */
-#define ARM_STATE3_STRIKE_CURRENT    13000.0f
+#define ARM_STATE3_STRIKE_CURRENT    14000.0f
 #define ARM_STATE3_STRIKE_DIR        (-1)
 #define ARM_STATE3_STRIKE_CUTOFF_POS (-2000.136f)
 
@@ -108,7 +108,7 @@
 #define TOSS_STATE1_SPEED_LIMIT      80.0f
 
 /* 电磁铁高度 - 状态2：拉齿条到蓄力位并保持。 */
-#define TOSS_STATE2_POS              (-5000.595f)
+#define TOSS_STATE2_POS              (-5200.595f)
 #define TOSS_STATE2_DIR              (-1)
 #define TOSS_STATE2_ANG_KP           0.50f
 #define TOSS_STATE2_ANG_KI           0.0f
@@ -122,7 +122,7 @@
 #define TOSS_STATE2_SPD_OUT          12000.0f
 #define TOSS_STATE2_ANGLE_DZ         0.0f
 #define TOSS_STATE2_SPEED_DZ         0.0f
-#define TOSS_STATE2_SPEED_LIMIT      800.0f
+#define TOSS_STATE2_SPEED_LIMIT      1000.0f
 
 /* 电磁铁高度 - 状态3：释放后保持进入发球瞬间的位置。 */
 #define TOSS_STATE3_HOLD_ANG_KP       0.0f
