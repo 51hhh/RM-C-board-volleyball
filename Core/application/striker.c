@@ -7,7 +7,8 @@
   *     上档 IDLE    : 臂/电磁铁高度电机回 0 等待，电磁铁吸合。
   *     中档 PREPARE : 臂按规定方向慢速转到蓄力位，高度电机到蓄力位，电磁铁持续吸合。
   *     下档 SERVE   : 电磁铁释放抛球，光电开关第一次触发 300ms 后臂开环击打；
-  *                    经过击球检测位后断流，靠重力回落。
+  *                    经过击球检测位后切入带阻尼的低增益主动回零。
+  *                    释放 3 秒仍无光电触发则锁存保护并自动回零。
   *
   *   两个位置轴都使用多圈累加坐标(度)，避免 3508 单圈编码器跨圈后只看到很小角差。
   *   状态二/三的运动目标在进入状态时锁存为规定方向上的等效多圈目标，不走最短路径。
@@ -54,7 +55,7 @@ typedef struct {
 static axis_t s_arm;
 static axis_t s_toss;
 
-/* 臂/电磁铁高度：位置等待用级联 PID；状态三击打臂改为开环电流。 */
+/* 臂/电磁铁高度：位置等待用级联 PID；状态三击打臂先开环，过位后低增益回零。 */
 static motor_pid_t arm_angle_pid,  arm_speed_pid;
 static motor_pid_t toss_angle_pid, toss_speed_pid;
 
@@ -69,6 +70,7 @@ enum {
     AXIS_PROFILE_STATE1,
     AXIS_PROFILE_STATE2,
     AXIS_PROFILE_STATE3_HOLD,
+    AXIS_PROFILE_STATE3_RETURN,
 };
 
 static uint8_t s_arm_profile = AXIS_PROFILE_NONE;
@@ -90,8 +92,10 @@ static uint8_t  s_photo_armed = 0;
 static uint8_t  s_photo_trigger_count = 0;
 static uint8_t  s_photo_strike_pending = 0;
 static uint8_t  s_photo_strike_fired = 0;
+static uint8_t  s_serve_timeout_latched = 0;
 static uint32_t s_photo_level_stamp = 0;
 static uint32_t s_photo_trigger_stamp = 0;
+static uint32_t s_magnet_release_stamp = 0;
 static uint8_t  s_startup_home_started = 0;
 static uint8_t  s_startup_home_done = 0;
 static uint32_t s_startup_home_stamp = 0;
@@ -181,6 +185,11 @@ static axis_loop_cfg_t arm_apply_profile(uint8_t profile)
             cfg.speed_dz = ARM_STATE3_HOLD_SPEED_DZ;
             cfg.speed_limit = ARM_STATE3_HOLD_SPEED_LIMIT;
             break;
+        case AXIS_PROFILE_STATE3_RETURN:
+            cfg.angle_dz = ARM_STATE3_RETURN_ANGLE_DZ;
+            cfg.speed_dz = ARM_STATE3_RETURN_SPEED_DZ;
+            cfg.speed_limit = ARM_STATE3_RETURN_SPEED_LIMIT;
+            break;
         case AXIS_PROFILE_STATE1:
         default:
             break;
@@ -209,6 +218,17 @@ static axis_loop_cfg_t arm_apply_profile(uint8_t profile)
         cfg.angle_dz = ARM_STATE3_HOLD_ANGLE_DZ;
         cfg.speed_dz = ARM_STATE3_HOLD_SPEED_DZ;
         cfg.speed_limit = ARM_STATE3_HOLD_SPEED_LIMIT;
+        break;
+
+    case AXIS_PROFILE_STATE3_RETURN:
+        apply_pid_config(&arm_angle_pid, &arm_speed_pid,
+                         ARM_STATE3_RETURN_ANG_KP, ARM_STATE3_RETURN_ANG_KI, ARM_STATE3_RETURN_ANG_KD,
+                         ARM_STATE3_RETURN_ANG_IMAX, ARM_STATE3_RETURN_ANG_OUT,
+                         ARM_STATE3_RETURN_SPD_KP, ARM_STATE3_RETURN_SPD_KI, ARM_STATE3_RETURN_SPD_KD,
+                         ARM_STATE3_RETURN_SPD_IMAX, ARM_STATE3_RETURN_SPD_OUT);
+        cfg.angle_dz = ARM_STATE3_RETURN_ANGLE_DZ;
+        cfg.speed_dz = ARM_STATE3_RETURN_SPEED_DZ;
+        cfg.speed_limit = ARM_STATE3_RETURN_SPEED_LIMIT;
         break;
 
     case AXIS_PROFILE_STATE1:
@@ -425,6 +445,12 @@ static float cascade_step(axis_t *ax, float target, float speed_rpm,
     return out_s;
 }
 
+/* 速度反向电流：只提供粘性阻尼，不改变位置目标。 */
+static float damping_step(float speed_rpm, float kp, float output_limit)
+{
+    return clampf(-speed_rpm * kp, -output_limit, output_limit);
+}
+
 static void enter_mode(uint32_t now_ms)
 {
     switch (s_mode) {
@@ -446,6 +472,7 @@ static void enter_mode(uint32_t now_ms)
         s_serve_current_on = 0;
         photo_serve_reset(now_ms);
         striker_magnet_set(false);
+        s_magnet_release_stamp = now_ms;
         clear_axis_pid();
         break;
 
@@ -483,10 +510,26 @@ static void serve_state_machine(uint32_t now_ms)
     case STRIKER_SERVE:
         striker_magnet_set(false);
         photo_serve_update(now_ms);
+
+        /* 电磁铁释放 3 秒仍未收到任何光电触发时，回到零点并锁存保护。
+         * 锁存防止拨杆仍在下档时下一拍再次进入 SERVE。 */
+        if (s_photo_trigger_count == 0U &&
+            now_ms - s_magnet_release_stamp >= ARM_STATE3_PHOTO_TIMEOUT_MS) {
+            s_serve_timeout_latched = 1U;
+            s_idle_hold_current = 0U;
+            s_mode = STRIKER_IDLE;
+            s_mode_entry = 1U;
+            clear_axis_pid();
+            enter_mode(now_ms);
+            break;
+        }
+
         if (s_serve_current_on &&
             axis_passed(s_arm.pos_abs, s_arm_strike_cutoff, ARM_STATE3_STRIKE_DIR)) {
             s_serve_current_on = 0;
             s_photo_strike_pending = 0U;
+            s_arm.target = ARM_STATE1_POS;
+            clear_axis_pid();
         }
         break;
 
@@ -512,6 +555,8 @@ void striker_init(void)
     s_startup_home_started = 0;
     s_startup_home_done = 0;
     s_startup_home_stamp = 0;
+    s_serve_timeout_latched = 0;
+    s_magnet_release_stamp = 0;
     photo_sensor_init();
     photo_serve_reset(0U);
     striker_magnet_set(true);
@@ -551,14 +596,18 @@ void striker_update(uint32_t now_ms)
     // 3) 发球状态机：设定/锁存目标 + 电磁铁 + 开环阶段
     serve_state_machine(now_ms);
 
-    // 4) 得电流：SERVE 等光电期间臂仍位置保持；击打过位断流后给 0 电流靠重力回落
+    // 4) 得电流：SERVE 等光电期间保持；击打过位后低增益主动回零并施加速度阻尼
     float i_arm = 0.0f;
     if (s_mode == STRIKER_SERVE && s_serve_current_on) {
         i_arm = ARM_STATE3_STRIKE_CURRENT * (float)ARM_STATE3_STRIKE_DIR;
         s_arm.pos_last = s_arm.pos_abs;     // 开环期间仍刷新速度基准，避免回位置环时速度突变
     } else if (s_mode == STRIKER_SERVE && s_photo_strike_fired) {
-        i_arm = 0.0f;
-        s_arm.pos_last = s_arm.pos_abs;     // 断流回落期间不再位置保持
+        axis_loop_cfg_t arm_cfg = arm_apply_profile(AXIS_PROFILE_STATE3_RETURN);
+        i_arm = cascade_step(&s_arm, s_arm.target, (float)arm_motor->speed_rpm,
+                             &arm_angle_pid, &arm_speed_pid,
+                             arm_cfg.angle_dz, arm_cfg.speed_dz, arm_cfg.speed_limit);
+        i_arm += damping_step((float)arm_motor->speed_rpm,
+                              ARM_STATE3_RETURN_DAMP_KP, ARM_STATE3_RETURN_DAMP_OUT);
     } else {
         uint8_t arm_profile = AXIS_PROFILE_STATE1;
         if (s_mode == STRIKER_PREPARE) {
@@ -570,6 +619,10 @@ void striker_update(uint32_t now_ms)
         i_arm = cascade_step(&s_arm, s_arm.target, (float)arm_motor->speed_rpm,
                              &arm_angle_pid, &arm_speed_pid,
                              arm_cfg.angle_dz, arm_cfg.speed_dz, arm_cfg.speed_limit);
+        if (s_mode == STRIKER_IDLE) {
+            i_arm += damping_step((float)arm_motor->speed_rpm,
+                                  ARM_STATE1_DAMP_KP, ARM_STATE1_DAMP_OUT);
+        }
     }
 
     uint8_t toss_profile = AXIS_PROFILE_STATE1;
@@ -598,6 +651,14 @@ void striker_update(uint32_t now_ms)
 void striker_set_mode(int mode)
 {
     if (mode == STRIKER_IDLE || mode == STRIKER_PREPARE || mode == STRIKER_SERVE) {
+        if (s_serve_timeout_latched) {
+            if (mode == STRIKER_SERVE) {
+                return;
+            }
+            /* 操作手退出状态3后，才允许下一次重新进入状态3。 */
+            s_serve_timeout_latched = 0U;
+        }
+
         /* 遥控三档从下档回上档时物理上会经过中档。
          * 已经发球后的 SERVE -> PREPARE 视为过渡噪声，避免逆向切换时重新蓄力。 */
         if (s_mode == STRIKER_SERVE && mode == STRIKER_PREPARE) {
@@ -710,4 +771,5 @@ void striker_get_debug(striker_debug_t *debug)
     debug->photo_trigger_count = s_photo_trigger_count;
     debug->photo_strike_pending = s_photo_strike_pending;
     debug->photo_strike_fired = s_photo_strike_fired;
+    debug->serve_timeout_latched = s_serve_timeout_latched;
 }

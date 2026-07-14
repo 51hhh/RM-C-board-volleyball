@@ -44,6 +44,9 @@
 #define ARM_STATE1_ANGLE_DZ        80.0f
 #define ARM_STATE1_SPEED_DZ        0.0f
 #define ARM_STATE1_SPEED_LIMIT     80.0f
+/* 位置环之外的附加速度阻尼，抑制底盘移动时击球臂受惯性摆动。 */
+#define ARM_STATE1_DAMP_KP         2.0f
+#define ARM_STATE1_DAMP_OUT        1200.0f
 
 /* 击球臂 - 状态2：蓄力到位并保持。 */
 #define ARM_STATE2_POS             3400.f
@@ -81,6 +84,26 @@
 #define ARM_STATE3_STRIKE_CURRENT    14000.0f
 #define ARM_STATE3_STRIKE_DIR        (-1)
 #define ARM_STATE3_STRIKE_CUTOFF_POS (-2000.136f)
+
+/* 击打过位后的低增益主动回零。速度环与附加阻尼共同抑制回落摆动。 */
+#define ARM_STATE3_RETURN_ANG_KP       0.25f
+#define ARM_STATE3_RETURN_ANG_KI       0.0f
+#define ARM_STATE3_RETURN_ANG_KD       0.0f
+#define ARM_STATE3_RETURN_ANG_IMAX     0.0f
+#define ARM_STATE3_RETURN_ANG_OUT      400.0f
+#define ARM_STATE3_RETURN_SPD_KP       6.0f
+#define ARM_STATE3_RETURN_SPD_KI       0.0f
+#define ARM_STATE3_RETURN_SPD_KD       0.0f
+#define ARM_STATE3_RETURN_SPD_IMAX     1200.0f
+#define ARM_STATE3_RETURN_SPD_OUT      3500.0f
+#define ARM_STATE3_RETURN_ANGLE_DZ     15.0f
+#define ARM_STATE3_RETURN_SPEED_DZ     0.0f
+#define ARM_STATE3_RETURN_SPEED_LIMIT  300.0f
+#define ARM_STATE3_RETURN_DAMP_KP      2.0f
+#define ARM_STATE3_RETURN_DAMP_OUT     1500.0f
+
+/* 电磁铁释放后没有检测到光电触发时，自动回零并锁存本次超时。 */
+#define ARM_STATE3_PHOTO_TIMEOUT_MS    3000U
 
 /* ====================== 电磁铁高度 / 抛球蓄力 (CAN2) ==================== *
  * 单个 M3508，ID 0x203，双环位置控制(移动到蓄力位并保持)。                */

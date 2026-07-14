@@ -8,7 +8,7 @@
   *   - 状态一：两轴 0 位等待，电磁铁吸合。
   *   - 状态二：两轴按规定方向到蓄力位等待，电磁铁持续吸合。
   *   - 状态三：电磁铁释放抛球，光电开关第一次触发 300ms 后臂开环击打，
-  *             经过击球检测位后断流。
+  *             经过击球检测位后带阻尼主动回零；3 秒无光电触发则保护回零。
   ******************************************************************************
   */
 #ifndef STRIKER_H
@@ -25,7 +25,7 @@ extern "C" {
 enum {
     STRIKER_IDLE    = 0,   // 上档：两轴回 0 等待，电磁铁吸合
     STRIKER_PREPARE = 1,   // 中档：两轴按规定方向到蓄力位，电磁铁吸合
-    STRIKER_SERVE   = 2,   // 下档：电磁铁释放，第一次光电触发 300ms 后击打并过位断流
+    STRIKER_SERVE   = 2,   // 下档：释放、光电延时击打、过位回零及无触发超时保护
 };
 
 typedef struct {
@@ -53,6 +53,7 @@ typedef struct {
     uint8_t photo_trigger_count;  // 本次 SERVE 中是否已识别第一次触发(0/1)
     uint8_t photo_strike_pending; // 1=第一次触发后等待 300ms 击打
     uint8_t photo_strike_fired;   // 1=本次 SERVE 已经触发过击打
+    uint8_t serve_timeout_latched;// 1=状态3等待光电超时，退出状态3后清除
 } striker_debug_t;
 
 /* 击球臂/电磁铁高度位置环 PID 初始化 */

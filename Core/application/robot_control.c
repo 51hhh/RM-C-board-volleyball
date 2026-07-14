@@ -110,8 +110,11 @@ static void remote_update(void)
             } else if (s == '\001') {
                 control_mode = 1;                  // 上拨 遥控控制
             } else if (s == '\002') {
-                control_mode = 0;                  // 下拨 进入校准
-                calib_start_stamp = current_time_stamp;
+                /* 陀螺仪尚未固定，暂时禁用下档的校准/自动状态机，
+                 * 避免误触后航向闭环造成底盘持续旋转。 */
+                // control_mode = 0;
+                // calib_start_stamp = current_time_stamp;
+                control_mode = 3;                  // 下拨暂按失能停车处理
             }
             rc_sw_last = s;
         }
