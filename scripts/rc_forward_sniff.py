@@ -25,8 +25,8 @@ import serial
 
 FRAME_LEN = 24
 MAGIC = 0xA55A
-VERSION = 1
-FMT = "<HBBHIhhhhBBHH"
+VERSION = 2
+FMT = "<HBBHIhhhhBBhH"
 SYNC = struct.pack("<H", MAGIC)
 VALID_SWITCH_VALUES = (1, 2, 3)
 
@@ -47,7 +47,7 @@ def parse_frame(raw: bytes) -> Tuple[Optional[Tuple], Optional[str]]:
     if len(raw) != FRAME_LEN:
         return None, "len"
     fields = struct.unpack(FMT, raw)
-    magic, version, payload_len, seq, tick_ms, lx, ly, rx, ry, sw_left, sw_right, reserved, crc16 = fields
+    magic, version, payload_len, seq, tick_ms, lx, ly, rx, ry, sw_left, sw_right, wheel, crc16 = fields
     if magic != MAGIC:
         return None, "magic"
     if payload_len != FRAME_LEN:
@@ -208,7 +208,7 @@ def read_frames(
                         stats["bad_crc"] += 1
                     continue
 
-                _, _, _, seq, tick_ms, lx, ly, rx, ry, sw_left, sw_right, reserved, crc = frame
+                _, _, _, seq, tick_ms, lx, ly, rx, ry, sw_left, sw_right, wheel, crc = frame
 
                 # 序号与丢帧检测
                 last_seq = stats["last_seq"]
@@ -250,7 +250,8 @@ def read_frames(
                     print(
                         f"seq={seq:5d} t={tick_ms:10d} "
                         f"lx={_fmt(lx)} ly={_fmt(ly)} rx={_fmt(rx)} ry={_fmt(ry)} "
-                        f"swL={sw_left} swR={sw_right} crc=0x{crc:04x}{tag}"
+                        f"wheel={_fmt(wheel)} swL={sw_left} swR={sw_right} "
+                        f"crc=0x{crc:04x}{tag}"
                     )
 
                 if raw:
@@ -329,30 +330,37 @@ def read_frames(
 
 
 def self_test() -> None:
-    frame_no_crc = struct.pack(
-        FMT,
-        MAGIC,
-        VERSION,
-        FRAME_LEN,
-        1,
-        1234,
-        -100,
-        200,
-        -300,
-        0,
-        2,
-        3,
-        0,
-        0,
-    )
-    frame_ok = bytearray(frame_no_crc[:-2])
-    frame_ok.extend(struct.pack("<H", crc16_modbus(frame_ok)))
-    parsed = parse_frame(bytes(frame_ok))
-    assert parsed[0] is not None
-    frame_bad = bytearray(frame_ok)
-    frame_bad[-1] ^= 0xFF
-    assert parse_frame(bytes(frame_bad))[0] is None
-    print("[self-test] 有效/无效帧解析检查通过")
+    assert struct.calcsize(FMT) == FRAME_LEN
+
+    for seq, wheel in enumerate((-660, 0, 660), start=1):
+        frame_no_crc = struct.pack(
+            FMT,
+            MAGIC,
+            VERSION,
+            FRAME_LEN,
+            seq,
+            1234,
+            -100,
+            200,
+            -300,
+            0,
+            2,
+            3,
+            wheel,
+            0,
+        )
+        frame_ok = bytearray(frame_no_crc[:-2])
+        frame_ok.extend(struct.pack("<H", crc16_modbus(frame_ok)))
+        parsed, reason = parse_frame(bytes(frame_ok))
+        assert reason is None
+        assert parsed is not None
+        assert parsed[11] == wheel
+
+        frame_bad = bytearray(frame_ok)
+        frame_bad[-1] ^= 0xFF
+        assert parse_frame(bytes(frame_bad))[0] is None
+
+    print("[self-test] 拨轮负值/零值/正值及坏帧解析检查通过")
 
 
 def main() -> None:

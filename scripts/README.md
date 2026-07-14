@@ -24,6 +24,7 @@ python3 scripts/rc_forward_sniff.py /dev/ttyACM0 --verbose
 ## 脚本功能
 
 - 帧长度固定 `24` 字节。
+- 解码四路摇杆、两路拨杆和有符号 16 位拨轮通道。
 - 自动按 `0xA55A` 同步。
 - 校验 `version/payload_len`。
 - 校验 CRC16/Modbus。
@@ -84,7 +85,8 @@ python3 scripts/rc_forward_sniff.py /dev/ttyACM0 --verbose
 - 固定帧定义：
   - 魔数：`0xA55A`
   - 长度：`24`
-  - 版本：`1`
+  - 版本：`2`
+  - 拨轮：有符号 16 位整数，通常范围 `-660..660`
   - CRC16：Modbus-16，低位优先
 - 字段说明见 `Core/application/rc_forward.h`
 

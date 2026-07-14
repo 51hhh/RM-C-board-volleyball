@@ -18,9 +18,9 @@ extern "C" {
 
 /* 帧头和版本 */
 #define RC_FORWARD_MAGIC     0xA55Au
-#define RC_FORWARD_VERSION   0x01u
+#define RC_FORWARD_VERSION   0x02u
 
-/* 固定字段定义：左右摇杆 + 左右拨杆 + 辅助字段 + CRC16 尾校验 */
+/* 固定字段定义：左右摇杆 + 左右拨杆 + 拨轮 + CRC16 尾校验 */
 typedef struct __attribute__((packed))
 {
     uint16_t magic;       /* 0xA55A */
@@ -36,7 +36,7 @@ typedef struct __attribute__((packed))
 
     uint8_t  sw_left;     /* 左拨杆：RC_SW_UP/MID/DOWN（1/2/3） */
     uint8_t  sw_right;    /* 右拨杆：RC_SW_UP/MID/DOWN（1/2/3） */
-    uint16_t reserved;     /* 预留字 */
+    int16_t  wheel;       /* 拨轮通道 ch4（-660..660） */
 
     uint16_t crc16;       /* CRC16/Modbus over [0..RC_FORWARD_FRAME_LEN-3] */
 } rc_forward_frame_t;

@@ -172,7 +172,7 @@ void rc_forward_poll(void)
         frame.ry = rc_snapshot.rc.ch[1]; /* 右摇杆 Y 对应 ch1 */
         frame.sw_left = (uint8_t)rc_snapshot.rc.s[1];
         frame.sw_right = (uint8_t)rc_snapshot.rc.s[0];
-        frame.reserved = 0u;
+        frame.wheel = rc_snapshot.rc.ch[4]; /* 拨轮对应 ch4 */
 
         frame.crc16 = crc16_modbus((const uint8_t *)&frame, (uint16_t)(RC_FORWARD_FRAME_LEN - sizeof(frame.crc16)));
 
